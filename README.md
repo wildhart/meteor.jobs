@@ -316,7 +316,7 @@ Jobs.register({
 Jobs.run('processMonthlyPayments', {singular: true});
 ```
 
-Since this package doesn't keeps a job history (compared with msavin:sjobs), you can use `this.reschedule()` indefinitely without polluting the jobs database, instead of having to use `this.replicate()` followed by `this.remove()`.
+Since this package doesn't keep a job history (compared with msavin:sjobs), you can use `this.reschedule()` indefinitely without polluting the jobs database, instead of having to use `this.replicate()` followed by `this.remove()`.
 
 ------
 
@@ -328,7 +328,7 @@ If any of these differences make this package unsuitable for you, please let me 
 - The Job configuration object doesn't support the `data` attribute - I never found any use for this.
 - The following [Jobs.configure()](#jobsconfigure) options are not available:
   - `autoStart` - in this package the job queue is always running - I didn't see the point of it not running.
-   - `interval` - this package doesn't regularly query the job queue for due jobs, instead it intelligently sets a timer for the next job.
+  - `interval` - this package doesn't regularly query the job queue for due jobs, instead it intelligently sets a timer for the next job.
   - `getDate`
   - `disableDevelopmentMode`
   - `remoteCollection`

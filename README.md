@@ -13,7 +13,7 @@ It can run hundreds of jobs in seconds with minimal CPU impact, making it a reas
 
 ## Coming from msavin:jobs?
 
-This package has an API inspired by [msavin:sjobs](https://github.com/msavin/SteveJobs..meteor.jobs.scheduler.queue.background.tasks) and in some cases can be a drop-in replacement.  If you're coming from msavin:jobs read about the potentially breaking **[API differences](#api-differences-from-msavin-sjobs)**. If any of these differences make this package unsuitable for you, please let me know and I'll consider fixing.
+This package has an API inspired by [msavin:sjobs](https://github.com/msavin/SteveJobs..meteor.jobs.scheduler.queue.background.tasks) and in some cases can be a drop-in replacement.  If you're coming from msavin:jobs read about the potentially breaking **[API differences](#api-differences-from-msavinsjobs)**. If any of these differences make this package unsuitable for you, please let me know and I'll consider fixing.
 
 The main difference in this package compared to `msavin:jobs` is that this package doesn't continuously poll the job queue. Instead, it intelligently sets a single timer for the next due job.  This means that most of the time this package is doing absolutely nothing, compared to `msavin:jobs` [which can use significant CPU even when idle](https://github.com/msavin/SteveJobs..meteor.jobs.scheduler.queue.background.tasks/issues/63). It also means that jobs are executed closer to their due date, instead of potentially late due to the polling interval.
 
@@ -77,20 +77,20 @@ The configuration object supports `date`, `in`, `on`, and `priority`, all of whi
 
 `Jobs.register` and `Jobs.run` are all you need to get started, but that's only the beginning of what the package can do. To explore the rest of the functionality, jump into the documentation:
 
- - [Jobs.configure](#jobs-configure)
- - [Jobs.register](#jobs-register)
- - [Jobs.run](#jobs-run)
- - [Jobs.execute](#jobs-execute)
- - [Jobs.reschedule](#jobs-reschedule)
- - [Jobs.replicate](#jobs-replicate)
- - [Jobs.start](#jobs-start)
- - [Jobs.stop](#jobs-stop)
- - [Jobs.get](#jobs-get)
- - [Jobs.cancel](#jobs-cancel)
- - [Jobs.clear](#jobs-clear)
- - [Jobs.remove](#jobs-remove)
- - [Jobs.collection](#jobs-collection)
- - [Jobs.findNext](#jobs-findNext)
+ - [Jobs.configure](#jobsconfigure)
+ - [Jobs.register](#jobsregister)
+ - [Jobs.run](#jobsrun)
+ - [Jobs.execute](#jobsexecute)
+ - [Jobs.reschedule](#jobsreschedule)
+ - [Jobs.replicate](#jobsreplicate)
+ - [Jobs.start](#jobsstart)
+ - [Jobs.stop](#jobsstop)
+ - [Jobs.get](#jobsget)
+ - [Jobs.cancel](#jobscancel)
+ - [Jobs.clear](#jobsclear)
+ - [Jobs.remove](#jobsremove)
+ - [Jobs.collection](#jobscollection)
+ - [Jobs.findNext](#jobsfindNext)
  - [A note about Multi-server environments](#a-note-about-multi-server-environments)
  - [Repeating Jobs](#repeating-jobs)
 
@@ -279,7 +279,7 @@ var success = Jobs.remove(docId);
 
 `Jobs.collection` allows you to access the MongoDB collection where the jobs are stored. Ideally, you should not require interaction with the database directly.
 
-**WARNING** - since this package sets a single timer based on the next due job (instead of `msavin:sjobs` which continuously polls all the job queues), any manual changes to the jobs database will not automatically re-check the job queue to set a timer for the next job. If this could be a problem, call [Jobs.findNext()](#Jobs.findNext) to schedule the next job.
+**WARNING** - since this package sets a single timer based on the next due job (instead of `msavin:sjobs` which continuously polls all the job queues), any manual changes to the jobs database will not automatically re-check the job queue to set a timer for the next job. If this could be a problem, call [Jobs.findNext()](#JobsfindNext) to schedule the next job.
 
 ### Jobs.findNext
 
@@ -326,19 +326,19 @@ If any of these differences make this package unsuitable for you, please let me 
 - This package doesn't keep a job history.
 - `failed` jobs are not retried.
 - The Job configuration object doesn't support the `data` attribute - I never found any use for this.
-- The following [Jobs.configure()](#jobs-configure) options are not available:
+- The following [Jobs.configure()](#jobsconfigure) options are not available:
  - `autoStart` - in this package the job queue is always running - I didn't see the point of it not running.
  - `interval` - this package doesn't regularly query the job queue for due jobs, instead it intelligently sets a timer for the next job.
  - `getDate`
  - `disableDevelopmentMode`
  - `remoteCollection`
-- The following [Jobs.configure()](#jobs-configure) options have additional options:
+- The following [Jobs.configure()](#jobsconfigure) options have additional options:
  - `setServerId` can be a `String` as as well as a `Function`
  - `log` can be a `Boolean` as well as a `Function`
-- In a [job function](#jobs-register), `this.set()` and `this.get()` are not provided - I never found any use for this.
-- In a [job function](#jobs-register), `this.success()` and `this.failure()` to not take a `result` parameter - this package doesn't keep a job history
-- [singular](#jobs-run) jobs only check for `pending` jobs of the same name, so they can be run again even if a previous job failed.
+- In a [job function](#jobsregister), `this.set()` and `this.get()` are not provided - I never found any use for this.
+- In a [job function](#jobsregister), `this.success()` and `this.failure()` to not take a `result` parameter - this package doesn't keep a job history
+- [singular](#jobsrun) jobs only check for `pending` jobs of the same name, so they can be run again even if a previous job failed.
 - `Jobs.start()` and `Jobs.stop()` don't exist - I don't see the point of the job queue not running but let me know if you need these.
-- `Jobs.cancel()` doesn't exist. Just remove it with [Jobs.remove()](#jobs-remove) - I don't see the point in keeping old jobs lying around.
-- [Jobs.clear()](#jobs-clear) can take additional `argument` parameters to only delete jobs matching those arguments.
-- [Jobs.findNext()](#jobs-findnext) is provided.
+- `Jobs.cancel()` doesn't exist. Just remove it with [Jobs.remove()](#jobsremove) - I don't see the point in keeping old jobs lying around.
+- [Jobs.clear()](#jobsclear) can take additional `argument` parameters to only delete jobs matching those arguments.
+- [Jobs.findNext()](#jobsfindnext) is provided.

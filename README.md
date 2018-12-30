@@ -327,14 +327,14 @@ If any of these differences make this package unsuitable for you, please let me 
 - `failed` jobs are not retried.
 - The Job configuration object doesn't support the `data` attribute - I never found any use for this.
 - The following [Jobs.configure()](#jobsconfigure) options are not available:
- - `autoStart` - in this package the job queue is always running - I didn't see the point of it not running.
- - `interval` - this package doesn't regularly query the job queue for due jobs, instead it intelligently sets a timer for the next job.
- - `getDate`
- - `disableDevelopmentMode`
- - `remoteCollection`
+  - `autoStart` - in this package the job queue is always running - I didn't see the point of it not running.
+   - `interval` - this package doesn't regularly query the job queue for due jobs, instead it intelligently sets a timer for the next job.
+  - `getDate`
+  - `disableDevelopmentMode`
+  - `remoteCollection`
 - The following [Jobs.configure()](#jobsconfigure) options have additional options:
- - `setServerId` can be a `String` as as well as a `Function`
- - `log` can be a `Boolean` as well as a `Function`
+  - `setServerId` can be a `String` as as well as a `Function`
+  - `log` can be a `Boolean` as well as a `Function`
 - In a [job function](#jobsregister), `this.set()` and `this.get()` are not provided - I never found any use for this.
 - In a [job function](#jobsregister), `this.success()` and `this.failure()` to not take a `result` parameter - this package doesn't keep a job history
 - [singular](#jobsrun) jobs only check for `pending` jobs of the same name, so they can be run again even if a previous job failed.

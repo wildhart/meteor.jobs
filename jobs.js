@@ -3,6 +3,7 @@ const settings = {
 	startupDelay: 1 * 1000, // default 1 second
 	maxWait: 5 * 60 * 1000, // specify how long the server could be inactive before another server takes on the master role  (default=5 min)
 	log: console.log,
+	autoStart: true,
 };
 const dominatorId = "dominatorId";
 
@@ -18,6 +19,7 @@ Jobs.configure = function(config) {
 		maxWait: Match.Maybe(Number),
 		setServerId: Match.Maybe(Match.OneOf(String, Function)),
 		log: Match.Maybe(Match.OneOf(undefined, null, Boolean, Function)),
+		autoStart: Match.Maybe(Boolean),
 	});
 	Object.assign(settings, config);
 	if (settings.log===true) settings.log = console.log;
@@ -156,6 +158,24 @@ Jobs.countPending = function(jobName, ...args) {
 	return count;
 };
 
+Jobs.start = function(jobNames) {
+	const update = {};
+	if (!jobNames || jobNames=='*') update.$set = {pausedJobs: []}; // remove the pausedJobs list == start all jobs
+	else update.$pullAll = {pausedJobs: (typeof jobNames=='string') ? [jobNames] : jobNames};
+
+	Jobs.dominatorCollection.upsert({_id: dominatorId}, update);
+	settings.log && settings.log('Jobs', 'startJobs', jobNames, update);
+}
+
+Jobs.stop = function(jobNames) {
+	const update = {};
+	if (!jobNames || jobNames=='*') update.$set = {pausedJobs: ['*']}; // stop all jobs
+	else update.$addToSet = {pausedJobs: (typeof jobNames=='string') ? jobNames : {$each: jobNames}};
+
+	Jobs.dominatorCollection.upsert({_id: dominatorId}, update);
+	settings.log && settings.log('Jobs', 'stopJobs', jobNames, update);
+}
+
 export { Jobs }
 
 /********************************* Controller *********************/
@@ -167,95 +187,112 @@ Meteor.startup(function() {
 })
 
 const dominator = {
-	serverId: null,
 	lastPing: null,
-	pingInterval: null,
-	takeControlTimeout: null,
+	_serverId: null,
+	_pingInterval: null,
+	_takeControlTimeout: null,
 	start() {
-		this.serverId = (typeof settings.setServerId == 'string' && settings.setServerId)
+		this._serverId = (typeof settings.setServerId == 'string' && settings.setServerId)
 			|| (typeof settings.setServerId == 'function' && settings.setServerId())
 			|| Random.id();
 
 		Jobs.dominatorCollection.find({_id: dominatorId}).observe({
-			changed: (newPing) => this.observer(newPing),
+			changed: (newPing) => this._observer(newPing),
 		});
 
 		this.lastPing = Jobs.dominatorCollection.findOne();
 		const lastPingIsOld = this.lastPing && this.lastPing.date && this.lastPing.date.valueOf() < new Date().valueOf() - settings.maxWait;
-		settings.log && settings.log('Jobs', 'startup', this.serverId, JSON.stringify(this.lastPing), 'isOld='+lastPingIsOld);
+		settings.log && settings.log('Jobs', 'startup', this._serverId, JSON.stringify(this.lastPing), 'isOld='+lastPingIsOld);
 
-		if (!this.lastPing) this.takeControl('no ping')																// fresh installation, no one is in control yet.
-		else if (this.lastPing.serverId == this.serverId) this.takeControl('restarted')								// we were in control but have restarted - resume control
-		else if (lastPingIsOld) this.takeControl('lastPingIsOld '+this.lastPing.serverId+' '+this.lastPing.date);	// other server lost control - take over
-		else this.observer(this.lastPing);																	// another server is recently in control, set a timer to check the ping...
+		if (!this.lastPing || !this.lastPing._serverId) this._takeControl('no ping')								// fresh installation, no one is in control yet.
+		else if (this.lastPing._serverId == this._serverId) this._takeControl('restarted')							// we were in control but have restarted - resume control
+		else if (lastPingIsOld) this._takeControl('lastPingIsOld '+this.lastPing._serverId+' '+this.lastPing.date);	// other server lost control - take over
+		else this._observer(this.lastPing);																	// another server is recently in control, set a timer to check the ping...
 		// else leave other server in control
 	},
-	observer(newPing) {
+	_observer(newPing) {
 		settings.log && settings.log('Jobs', 'dominator.observer', newPing);
-		if (this.lastPing && this.lastPing.serverId==this.serverId && newPing.serverId!=this.serverId) {
+		if (this.lastPing && this.lastPing._serverId==this._serverId && newPing._serverId!=this._serverId) {
 			// we were in control but another server has taken control
-			relinquishControl();
+			_relinquishControl();
 		}
+		const oldPausedJobs = this.lastPing && this.lastPing.pausedJobs || [];
 		this.lastPing = newPing;
-		if (this.takeControlTimeout) {
-			Meteor.clearTimeout(this.takeControlTimeout);
-			this.takeControlTimeout = null;
+		if ((this.lastPing.pausedJobs||[]).join() != oldPausedJobs.join()) {
+			// the list of paused jobs has changed - re-configure the job observer
+			jobObserver.restart(); // needs dominator.lastPing.pausedJobs to be up-to-date
 		}
-		if (this.lastPing.serverId!=this.serverId) {
+		if (this._takeControlTimeout) {
+			Meteor.clearTimeout(this._takeControlTimeout);
+			this._takeControlTimeout = null;
+		}
+		if (this.lastPing._serverId!=this._serverId) {
 			// we're not in control, set a timer to take control in the future...
-			this.takeControlTimeout = Meteor.setTimeout(() => {
+			this._takeControlTimeout = Meteor.setTimeout(() => {
 				// if this timeout isn't cleared then the dominator hasn't been updated recently so we should take control.
-				this.takeControl('lastPingIsOld '+this.lastPing.serverId+' '+this.lastPing.date);
+				this._takeControl('lastPingIsOld '+this.lastPing._serverId+' '+this.lastPing.date);
 			}, settings.maxWait);
 		}
 	},
-	takeControl(reason) {
+	_takeControl(reason) {
 		settings.log && settings.log('Jobs', 'takeControl', reason);
-		this.ping();
+		this._ping();
 		jobObserver.start();
 	},
-	relinquishControl() {
+	_relinquishControl() {
 		settings.log && settings.log('Jobs', 'relinquishControl');
-		Meteor.clearInterval(this.pingInterval);
-		this.pingInterval = null;
+		Meteor.clearInterval(this._pingInterval);
+		this._pingInterval = null;
 		jobObserver.stop();
 	},
-	ping() {
-		if (!this.pingInterval) this.pingInterval = Meteor.setInterval(()=>this.ping(), settings.maxWait*0.8);
-		Jobs.dominatorCollection.upsert({_id: dominatorId}, {
-			serverId: this.serverId,
+	_ping() {
+		if (!this._pingInterval) this._pingInterval = Meteor.setInterval(()=>this._ping(), settings.maxWait*0.8);
+		const newPing = {
+			_serverId: this._serverId,
+			pausedJobs: this.lastPing ? (this.lastPing.pausedJobs || []) : (settings.autoStart ? [] : ['*']),
 			date: new Date(),
-		});
-		settings.log && settings.log('Jobs', 'ping', this.lastPing.date);
+		};
+		if (!this.lastPing) this.lastPing = newPing;
+		Jobs.dominatorCollection.upsert({_id: dominatorId}, newPing);
+		settings.log && settings.log('Jobs', 'ping', newPing.date, 'paused:', newPing.pausedJobs);
 	},
 };
 
 const jobObserver = {
-	handle: null,
-	jobTimeout: null,
+	_handle: null,
+	_timeout: null,
 	start() {
-		if (!this.handle) this.handle = Jobs.collection.find({state: "pending"}, {limit: 1, sort: {due: 1}, fields: {name: 1, due: 1}}).observe({
-			changed: (job) => this.observer('changed', job),
-			added: (job) => this.observer('added', job),
+		if (this._handle && this._handle!='paused') this.stop(); // this also clears any existing job timeout
+		const pausedJobs = (dominator.lastPing||{}).pausedJobs || [];
+		console.log('Jobs', 'jobObserver.start paused:', pausedJobs);
+		this._handle = pausedJobs[0]=='*' ? 'paused' : Jobs.collection.find({
+			state: "pending",
+			name: {$nin: pausedJobs},
+		}, {
+			limit: 1,
+			sort: {due: 1},
+			fields: {name: 1, due: 1},
+		}).observe({
+			changed: (job) => this._observer('changed', job),
+			added: (job) => this._observer('added', job),
 		});
 		// this will automatically call the observer which will set the timer for the next job.
 	},
 	stop() {
-		if (this.handle) this.handle.stop();
-		this.handle = null;
-		this.clearTimeout();
+		if (this._handle && this._handle!='paused') this._handle.stop();
+		this._handle = null;
+		this._observer('stop', null);
 	},
-	observer(type, nextJob) {
+	restart() {
+		if (this._handle) this.start(); // only restart the queue if we're already watching it (maybe jobs were paused inside _executeJobs()
+	},
+	_observer(type, nextJob) {
 		console.log('Jobs', 'jobsObserver.observer', type, nextJob, nextJob && ((nextJob.due - new Date())/(60*60*1000)).toFixed(2)+'h');
-		this.clearTimeout();
-		if (nextJob) this.jobTimeout = Meteor.setTimeout(()=>this.executeJobs(), nextJob.due - new Date());
+		if (this._timeout) Meteor.clearTimeout(this._timeout);
+		this._timeout = nextJob ? Meteor.setTimeout(()=>this._executeJobs(), nextJob.due - new Date()) : null;
 	},
-	clearTimeout() {
-		if (this.jobTimeout) Meteor.clearTimeout(this.jobTimeout);
-		this.jobTimeout = null;
-	},
-	executeJobs() {
-		settings.log && settings.log('Jobs', 'executeJobs');
+	_executeJobs() {
+		settings.log && settings.log('Jobs', 'executeJobs', 'paused:', dominator.lastPing.pausedJobs);
 		this.stop(); // ignore job queue changes while executing jobs. Will restart observer with .start() at end
 		try {
 			var job, doneJobs;
@@ -265,7 +302,7 @@ const jobObserver = {
 					job = Jobs.collection.findOne({
 						state: "pending",
 						due: {$lte: new Date()},
-						name: {$nin: doneJobs}, // give other job types a chance...
+						name: {$nin: doneJobs.concat(dominator.lastPing.pausedJobs)}, // give other job types a chance...
 					}, {sort: {due: 1, priority: -1}});
 					if (job) {
 						executeJob(job);

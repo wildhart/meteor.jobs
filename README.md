@@ -103,6 +103,8 @@ Jobs.configure({
 	startupDelay: Number,             // (milliseconds) specify how long after server startup the package should start running
 	setServerId: String || Function,  // determine how to set the serverId - see below. (default = random string)
 	log: Boolean || Function,         // determine if/how to log the package outputs (defalt = console.log)
+	autoStart: Boolean,               // specify if all job queues should start automatically on first launch (default = true)...
+	                                  //  ... after server relaunch the list of paused queues is restored from the database.
 })
 ```
 `setServerId` - In a **multi-server deployment**, jobs are only executed on one server.  Each server should have a unique ID so that it knows if it is control of the job queue or not. You can provide a function which returns a serverId from somewhere, or provide a static string (e.g. from an environment variable).  In a **single-server deployment** set this to a static string so that the server knows that it is always in control.
@@ -178,7 +180,7 @@ The configuration object supports the following inputs:
 		- millisecond, second, minute, hour, day, month, and year
 		- milliseconds, seconds, minutes, hours, days, months, and years
 	- The date object will be updated in the order that is specified. This means that if it is year 2017, and you set `in` one year, but `on` 2019, the year 2019 will be the final result. However, if you set `on` 2019 and `in` one year, then the year 2020 will be the final result.
-- **`priority`** - Number 
+- **`priority`** - Number
 	- The default priority for each job is 0
 	- If you set it to a positive integer, it will run ahead of other jobs.
 	- If you set it to a negative integer, it will only run after all the zero or positive jobs have completed.
@@ -227,6 +229,39 @@ var jobId = Jobs.replicate(jobId, {
 ```
 
 `Jobs.replicate` returns a `jobId`.
+
+### Jobs.start
+
+`Jobs.start` allows you start all the queues. This runs automatically unless `autoStart` is set to `false`. If you call the function with no arguments, it will start all the queues. If you pass in a String, it will start a queue with that name. If you pass in an Array, it will start all the queues named in the array.
+
+```javascript
+// Start all the queues
+Jobs.start()
+
+// Start just one queue
+Jobs.start("sendReminder")
+
+// Start multiple queues
+Jobs.start(["sendReminder", "sendEmail"])
+```
+Unlike msavin:sjobs, this function can be called on any server and whichever server is currently in control of the job queue will be notified.
+
+
+### Jobs.stop
+
+`Jobs.stop` allows you stop all the queues. If you call the function with no arguments, it will stop all the queues. If you pass in a String, it will stop a queue with that name. If you pass in an Array, it will stop all the queues named in the array.
+
+```javascript
+// Stop all the queues
+Jobs.stop()
+
+// Stop just one queue
+Jobs.stop("sendReminder")
+
+// Stop multiple queues
+Jobs.stop(["sendReminder", "sendEmail"])
+```
+Unlike msavin:sjobs, this function can be called on any server and whichever server is currently in control of the job queue will be notified.
 
 ### Jobs.get
 
@@ -306,18 +341,18 @@ If any of these differences make this package unsuitable for you, please let me 
 - This package doesn't keep a job history.
 - `failed` jobs are not retried.
 - The Job configuration object doesn't support the `data` attribute - I never found any use for this.
-- The following [Jobs.configure()](#jobsconfigure) options are not available:
-  - `autoStart` - in this package the job queue is always running - I didn't see the point of it not running.
+- The following [Jobs.configure()](#jobsconfigure) options are not available or different:
   - `interval` - this package doesn't regularly query the job queue for due jobs, instead it intelligently sets a timer for the next job.
   - `getDate`
   - `disableDevelopmentMode`
   - `remoteCollection`
+  - `autoStart` - only relevant on first launch. On relaunch the list of paused queues is restored from the database.
 - The following [Jobs.configure()](#jobsconfigure) options have additional options:
   - `setServerId` can be a `String` as as well as a `Function`
   - `log` can be a `Boolean` as well as a `Function`
 - In a [job function](#jobsregister), `this.set()` and `this.get()` are not provided - I never found any use for this.
 - In a [job function](#jobsregister), `this.success()` and `this.failure()` to not take a `result` parameter - this package doesn't keep a job history
 - [singular](#jobsrun) jobs only check for `pending` jobs of the same name, so they can be run again even if a previous job failed.
-- `Jobs.start()` and `Jobs.stop()` don't exist - I don't see the point of the job queue not running but let me know if you need these.
+- `Jobs.start()` and `Jobs.stop()` can be called on any server and whichever server is in control of the job queue will be notified.
 - `Jobs.cancel()` doesn't exist. Just remove it with [Jobs.remove()](#jobsremove) - I don't see the point in keeping old jobs lying around.
 - [Jobs.clear()](#jobsclear) can take additional `argument` parameters to only delete jobs matching those arguments.

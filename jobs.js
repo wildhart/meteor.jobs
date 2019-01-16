@@ -13,6 +13,7 @@ const Jobs = {
 };
 
 Jobs.collection._ensureIndex({name: 1, due: 1, state: 1});
+// we don't need an index on job_dominator_3 because now it only contains one shared document.
 
 Jobs.configure = function(config) {
 	check(config, {
@@ -22,7 +23,7 @@ Jobs.configure = function(config) {
 		autoStart: Match.Maybe(Boolean),
 	});
 	Object.assign(settings, config);
-	if (settings.log===true) settings.log = console.log;
+	if (settings.log === true) settings.log = console.log;
 	settings.log && settings.log('Jobs', 'Jobs.configure', Object.keys(config));
 };
 
@@ -68,7 +69,7 @@ Jobs.run = function(name, ...args) {
 		error = true;
 	}
 
-	if (config && typeof config.callback =='function') config.callback(error, jobId && jobDoc);
+	if (config && typeof config.callback=='function') config.callback(error, jobId && jobDoc);
 	return jobDoc;
 };
 
@@ -77,7 +78,7 @@ Jobs.execute = function(jobId) {
 	settings.log && settings.log('Jobs', 'Jobs.execute', jobId);
 	const job = Jobs.collection.findOne(jobId);
 	if (!job) return console.warn('Jobs', 'Jobs.execute', 'JOB NOT FOUND', jobId);
-	if (job.state!='pending') return console.warn('Jobs', 'Jobs.execute', 'JOB IS NOT PENDING', job)
+	if (job.state != 'pending') return console.warn('Jobs', 'Jobs.execute', 'JOB IS NOT PENDING', job)
 
 	executeJob(job);
 }
@@ -103,7 +104,7 @@ Jobs.reschedule = function(jobId, config) {
 	if (config.priority) set.priority = config.priority;
 	const count = Jobs.collection.update({_id: jobId, state: 'pending'}, {$set: set});
 	settings.log && settings.log('Jobs', '    Jobs.reschedule', jobId, config, date, count);
-	if (typeof config.callback =='function') config.callback(count==0, count);
+	if (typeof config.callback == 'function') config.callback(count==0, count);
 };
 
 Jobs.remove = function(jobId) {
@@ -115,34 +116,34 @@ Jobs.remove = function(jobId) {
 Jobs.clear = function(state, jobName, ...args) {
 	const query = {};
 
-	if (state==="*") query.state = {$exists: true};
-	else if (typeof state==="string") query.state = state;
-	else if (typeof state==="object" && state) query.state = {$in: state}; // && state to allow state=null for default
+	if (state === "*") query.state = {$exists: true};
+	else if (typeof state === "string") query.state = state;
+	else if (typeof state === "object" && state) query.state = {$in: state}; // && state to allow state=null for default
 	else query.state = {$in: ["success", "failure"]};
 
 	if (typeof jobName === "string") query.name = jobName;
 	else if (typeof jobName === "object") query.name = {$in: jobName};
 
 	const callback = args.length && typeof args[args.length-1]=='function' ? args.pop() : false;
-	for (var a=0; a<args.length; a++) query["arguments."+a]=args[a];
+	for (var a=0; a<args.length; a++) query["arguments."+a] = args[a];
 
 	const count = Jobs.collection.remove(query);
 	settings.log && settings.log('Jobs', 'Jobs.clear', count, query);
-	if (typeof callback=='function') callback(null, count);
+	if (typeof callback == 'function') callback(null, count);
 	return count;
 };
 
 Jobs.findOne = function(jobName, ...args) {
 	check(jobName, String);
 	const query = {name: jobName};
-	for (var a=0; a<args.length; a++) query["arguments."+a]=args[a];
+	for (var a=0; a<args.length; a++) query["arguments."+a] = args[a];
 	return Jobs.collection.findOne(query);
 };
 
 Jobs.count = function(jobName, ...args) {
 	check(jobName, String);
 	const query = {name: jobName};
-	for (var a=0; a<args.length; a++) query["arguments."+a]=args[a];
+	for (var a=0; a<args.length; a++) query["arguments."+a] = args[a];
 	const count = Jobs.collection.find(query).count();
 	return count;
 };
@@ -153,15 +154,15 @@ Jobs.countPending = function(jobName, ...args) {
 		name: jobName,
 		state: 'pending',
 	};
-	for (var a=0; a<args.length; a++) query["arguments."+a]=args[a];
+	for (var a=0; a<args.length; a++) query["arguments."+a] = args[a];
 	const count = Jobs.collection.find(query).count();
 	return count;
 };
 
 Jobs.start = function(jobNames) {
 	const update = {};
-	if (!jobNames || jobNames=='*') update.$set = {pausedJobs: []}; // remove the pausedJobs list == start all jobs
-	else update.$pullAll = {pausedJobs: (typeof jobNames=='string') ? [jobNames] : jobNames};
+	if (!jobNames || jobNames=='*') update.$set = {pausedJobs: []}; // clear the pausedJobs list, start all jobs
+	else update.$pullAll = {pausedJobs: typeof jobNames=='string' ? [jobNames] : jobNames};
 
 	Jobs.dominatorCollection.upsert({_id: dominatorId}, update);
 	settings.log && settings.log('Jobs', 'startJobs', jobNames, update);
@@ -170,7 +171,7 @@ Jobs.start = function(jobNames) {
 Jobs.stop = function(jobNames) {
 	const update = {};
 	if (!jobNames || jobNames=='*') update.$set = {pausedJobs: ['*']}; // stop all jobs
-	else update.$addToSet = {pausedJobs: (typeof jobNames=='string') ? jobNames : {$each: jobNames}};
+	else update.$addToSet = {pausedJobs: typeof jobNames=='string' ? jobNames : {$each: jobNames}};
 
 	Jobs.dominatorCollection.upsert({_id: dominatorId}, update);
 	settings.log && settings.log('Jobs', 'stopJobs', jobNames, update);
@@ -204,29 +205,30 @@ const dominator = {
 		const lastPingIsOld = this.lastPing && this.lastPing.date && this.lastPing.date.valueOf() < new Date().valueOf() - settings.maxWait;
 		settings.log && settings.log('Jobs', 'startup', this._serverId, JSON.stringify(this.lastPing), 'isOld='+lastPingIsOld);
 
+		// need !this.lastPing._serverId on following line in case Jobs.start() or Jobs.stop() updates pausedJobs before
 		if (!this.lastPing || !this.lastPing._serverId) this._takeControl('no ping')								// fresh installation, no one is in control yet.
 		else if (this.lastPing._serverId == this._serverId) this._takeControl('restarted')							// we were in control but have restarted - resume control
 		else if (lastPingIsOld) this._takeControl('lastPingIsOld '+this.lastPing._serverId+' '+this.lastPing.date);	// other server lost control - take over
 		else this._observer(this.lastPing);																	// another server is recently in control, set a timer to check the ping...
-		// else leave other server in control
 	},
 	_observer(newPing) {
 		settings.log && settings.log('Jobs', 'dominator.observer', newPing);
 		if (this.lastPing && this.lastPing._serverId==this._serverId && newPing._serverId!=this._serverId) {
 			// we were in control but another server has taken control
-			_relinquishControl();
+			this._relinquishControl();
 		}
 		const oldPausedJobs = this.lastPing && this.lastPing.pausedJobs || [];
 		this.lastPing = newPing;
 		if ((this.lastPing.pausedJobs||[]).join() != oldPausedJobs.join()) {
-			// the list of paused jobs has changed - re-configure the job observer
-			jobObserver.restart(); // needs dominator.lastPing.pausedJobs to be up-to-date
+			// the list of paused jobs has changed - update the query for the job observer
+			// needs dominator.lastPing.pausedJobs to be up-to-date so do this.lastPing = newPing above
+			jobObserver.restart();
 		}
 		if (this._takeControlTimeout) {
 			Meteor.clearTimeout(this._takeControlTimeout);
 			this._takeControlTimeout = null;
 		}
-		if (this.lastPing._serverId!=this._serverId) {
+		if (this.lastPing._serverId != this._serverId) {
 			// we're not in control, set a timer to take control in the future...
 			this._takeControlTimeout = Meteor.setTimeout(() => {
 				// if this timeout isn't cleared then the dominator hasn't been updated recently so we should take control.
@@ -265,6 +267,8 @@ const jobObserver = {
 		if (this._handle && this._handle!='paused') this.stop(); // this also clears any existing job timeout
 		const pausedJobs = (dominator.lastPing||{}).pausedJobs || [];
 		console.log('Jobs', 'jobObserver.start paused:', pausedJobs);
+		
+		// don't bother creating an observer if all jobs are paused
 		this._handle = pausedJobs[0]=='*' ? 'paused' : Jobs.collection.find({
 			state: "pending",
 			name: {$nin: pausedJobs},
@@ -284,7 +288,9 @@ const jobObserver = {
 		this._observer('stop', null);
 	},
 	restart() {
-		if (this._handle) this.start(); // only restart the queue if we're already watching it (maybe jobs were paused inside _executeJobs()
+		// this is called by Jobs.start() and Jobs.stop() when the list of pausedJobs changes
+		// only restart the queue if we're already watching it (maybe jobs were started/paused inside _executeJobs())
+		if (this._handle) this.start();
 	},
 	_observer(type, nextJob) {
 		console.log('Jobs', 'jobsObserver.observer', type, nextJob, nextJob && ((nextJob.due - new Date())/(60*60*1000)).toFixed(2)+'h');
@@ -295,10 +301,15 @@ const jobObserver = {
 		settings.log && settings.log('Jobs', 'executeJobs', 'paused:', dominator.lastPing.pausedJobs);
 		this.stop(); // ignore job queue changes while executing jobs. Will restart observer with .start() at end
 		try {
+			// need to prevent 1000s of the same job type from hogging the job queue and delaying other jobs
+			// after running a job, add its job.name to doneJobs, then find the next job excluding those in doneJobs
+			// if no other jobs can be found then clear doneJobs to allow the same job to run again.
 			var job, doneJobs;
 			do {
 				doneJobs = [];
 				do {
+					// findOne() is actually async but is wrapped in a Fiber, so we don't need to worry about blocking the server
+					// always use the live version of dominator.lastPing.pausedJobs in case jobs are paused/restarted while executing
 					job = Jobs.collection.findOne({
 						state: "pending",
 						due: {$lte: new Date()},
@@ -310,7 +321,6 @@ const jobObserver = {
 					}
 				} while (job);
 			} while (doneJobs.length);
-			// Jobs.collection.find({state: "pending", due: {$lte: new Date()}}, {sort: {due: 1, priority: -1}}).forEach(executeJob);
 		} catch(e) {
 			console.warn('Jobs', 'executeJobs ERROR');
 			console.warn(e);
@@ -389,13 +399,13 @@ function getDateFromConfig(config) {
 					if (isNaN(newNumber)) {
 						console.warn('Jobs', "invalid type was input: " + key1 + "." + key2, newNumber)
 					} else {
+						// convert month(s) => months (etc), and day(s) => date and year(s) => fullYear
 						let fn = (key2+"s").replace('ss', 's').replace('days','date').replace('years','fullYear');
+						// convert months => Months
 						fn = fn.charAt(0).toUpperCase() + fn.slice(1);
+						// if key1=='in' currentDate.setMonth(newNumber + currentDate.getMonth())
+						// if key1=='on' currentDate.setMonth(newNumber)
 						currentDate['set'+fn](newNumber + (key1=='in' ? currentDate['get'+fn]() : 0));
-						// this is shorthand for:
-						//		if key1=='in' currentDate.setMonth(newNumber + currentDate.getMonth())
-						//		if key1=='in' currentDate.setMonth(newNumber)
-						// where set<Month> & get<Month> are defined by key2
 					}
 				} catch (e) {
 					console.warn('Jobs', "invalid argument was ignored: " + key1 + "." + key2, newNumber, fn);
@@ -404,7 +414,6 @@ function getDateFromConfig(config) {
 			});
 		}
 	});
-	// settings.log && settings.log('Jobs', 'getDateFromConfig', config, currentDate);
 	return currentDate;
 }
 

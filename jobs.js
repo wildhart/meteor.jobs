@@ -258,7 +258,22 @@ const jobObserver = {
 		settings.log && settings.log('Jobs', 'executeJobs');
 		this.stop(); // ignore job queue changes while executing jobs. Will restart observer with .start() at end
 		try {
-			Jobs.collection.find({state: "pending", due: {$lte: new Date()}}, {sort: {due: 1, priority: -1}}).forEach(executeJob);
+			var job, doneJobs;
+			do {
+				doneJobs = [];
+				do {
+					job = Jobs.collection.findOne({
+						state: "pending",
+						due: {$lte: new Date()},
+						name: {$nin: doneJobs}, // give other job types a chance...
+					}, {sort: {due: 1, priority: -1}});
+					if (job) {
+						executeJob(job);
+						doneJobs.push(job.name); // don't do this job type again until we've tried other jobs.
+					}
+				} while (job);
+			} while (doneJobs.length);
+			// Jobs.collection.find({state: "pending", due: {$lte: new Date()}}, {sort: {due: 1, priority: -1}}).forEach(executeJob);
 		} catch(e) {
 			console.warn('Jobs', 'executeJobs ERROR');
 			console.warn(e);

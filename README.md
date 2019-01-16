@@ -90,7 +90,6 @@ The configuration object supports `date`, `in`, `on`, and `priority`, all of whi
  - [Jobs.clear](#jobsclear)
  - [Jobs.remove](#jobsremove)
  - [Jobs.collection](#jobscollection)
- - [Jobs.findNext](#jobsfindNext)
  - [A note about Multi-server environments](#a-note-about-multi-server-environments)
  - [Repeating Jobs](#repeating-jobs)
 
@@ -279,29 +278,6 @@ var success = Jobs.remove(docId);
 
 `Jobs.collection` allows you to access the MongoDB collection where the jobs are stored. Ideally, you should not require interaction with the database directly.
 
-**WARNING** - since this package sets a single timer based on the next due job (instead of `msavin:sjobs` which continuously polls all the job queues), any manual changes to the jobs database will not automatically re-check the job queue to set a timer for the next job. If this could be a problem, call [Jobs.findNext()](#JobsfindNext) to schedule the next job.
-
-### Jobs.findNext
-
-This tells the server to re-scan the job queue and set the timer for the next due job. Use this if you manually make changes to the jobs database:
-
-```javascript
-// delete all scheduled emails to @apple.com addresses (can't do this via the standard API because a regex is an object which Jobs.clear would interpret as a callback)
-var count = Jobs.collection.remove({
-	jobName: 'sendEmail',
-	"arguments.0": /@apple.com$/i
-});
-if (count) Jobs.findNext();
-```
-## A note about Multi-server environments
-
-In a multi-server environment, only one server is in control of the jobs queue at any time. Which server is currently in control is determined by the `jobs_dominator_3` database.
-
-When any of your servers make changes to the job queue, that server will take control of the job queue and schedule the timer for the next due job. This is quicker and easier than somehow telling whichever server is in control that the job queue has changed.
-
-This means that whenever your servers call `Jobs.run`, `Jobs.execute`, `Jobs.reschedule`, `Jobs.replicate`, `Jobs.clear`, `Jobs.remove` or `Jobs.findNext`, control of the job queue might switch servers.
-
-
 ## Repeating jobs
 
 Repeating jobs can be created by using `this.reschedule()` in the job function, e.g.:
@@ -341,4 +317,3 @@ If any of these differences make this package unsuitable for you, please let me 
 - `Jobs.start()` and `Jobs.stop()` don't exist - I don't see the point of the job queue not running but let me know if you need these.
 - `Jobs.cancel()` doesn't exist. Just remove it with [Jobs.remove()](#jobsremove) - I don't see the point in keeping old jobs lying around.
 - [Jobs.clear()](#jobsclear) can take additional `argument` parameters to only delete jobs matching those arguments.
-- [Jobs.findNext()](#jobsfindnext) is provided.

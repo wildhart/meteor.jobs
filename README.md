@@ -263,6 +263,12 @@ Jobs.stop(["sendReminder", "sendEmail"])
 ```
 Unlike msavin:sjobs, this function can be called on any server and whichever server is currently in control of the job queue will be notified.
 
+If you need to stop all jobs via mongo use:
+```js
+mongo> db.jobs_dominator_3.update({_id:"dominatorId"}, {$set: {pausedJobs: ['*']}});
+```
+The in-control server should observe the change and stop instantly. Use `{$unset: {pausedJobs: 1}}` or `{$set: {pausedJobs: []}}` to start all the queues again.
+
 ### Jobs.get
 
 `Jobs.get` allows you to get a job document by its document id.

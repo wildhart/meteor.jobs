@@ -71,7 +71,7 @@ Jobs.run("sendReminder", "jony@apple.com", "The future is here!", {
 });
 ```
 
-The configuration object supports `date`, `in`, `on`, and `priority`, all of which are completely optional.
+The configuration object supports `date`, `in`, `on`, and `priority`, all of which are completely optional, see [Jobs.run](#jobsrun).
 
 ## API Documentation
 
@@ -95,7 +95,7 @@ The configuration object supports `date`, `in`, `on`, and `priority`, all of whi
 
 ### Jobs.configure
 
-`Jobs.configure` allows you to configure how the package should work. You can figure one option or all of them. Defaults are shown in the code below:
+`Jobs.configure` allows you to configure how the package should work. You can configure one option or all of them. Defaults are shown in the code below:
 
 ```javascript
 Jobs.configure({
@@ -107,7 +107,7 @@ Jobs.configure({
 	                                  //  ... after server relaunch the list of paused queues is restored from the database.
 })
 ```
-`setServerId` - In a **multi-server deployment**, jobs are only executed on one server.  Each server should have a unique ID so that it knows if it is control of the job queue or not. You can provide a function which returns a serverId from somewhere, or provide a static string (e.g. from an environment variable).  In a **single-server deployment** set this to a static string so that the server knows that it is always in control.
+`setServerId` - In a **multi-server deployment**, jobs are only executed on one server.  Each server should have a unique ID so that it knows if it is control of the job queue or not. You can provide a function which returns a serverId from somewhere (e.g. from an environment variable) or just use the default of a random string.  In a **single-server deployment** set this to a static string so that the server knows that it is always in control and can take control more quickly after a reboot.
 
 ### Jobs.register
 

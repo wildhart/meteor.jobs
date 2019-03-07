@@ -167,8 +167,6 @@ Jobs.start = function(jobNames) {
 
 	Jobs.dominatorCollection.upsert({_id: dominatorId}, update);
 	settings.log && settings.log('Jobs', 'startJobs', jobNames, update);
-<<<<<<< HEAD
-=======
 }
 
 Jobs.stop = function(jobNames) {
@@ -178,7 +176,6 @@ Jobs.stop = function(jobNames) {
 
 	Jobs.dominatorCollection.upsert({_id: dominatorId}, update);
 	settings.log && settings.log('Jobs', 'stopJobs', jobNames, update);
->>>>>>> dd298e4e45c6ea3ddafc8c9b18c9cca06b6f8d84
 }
 
 Jobs.stop = function(jobNames) {

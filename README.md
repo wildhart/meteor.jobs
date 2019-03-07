@@ -93,10 +93,7 @@ The configuration object supports `date`, `in`, `on`, and `priority`, all of whi
  - [Jobs.collection](#jobscollection)
  - [Repeating Jobs](#repeating-jobs)
  - [Bulk Operations](#bulk-operations)
-<<<<<<< HEAD
  - [Version History](#version-history)
-=======
->>>>>>> dd298e4e45c6ea3ddafc8c9b18c9cca06b6f8d84
 
 ### Jobs.configure
 
@@ -268,15 +265,12 @@ Jobs.stop(["sendReminder", "sendEmail"])
 ```
 Unlike msavin:sjobs, this function can be called on any server and whichever server is currently in control of the job queue will be notified.
 
-<<<<<<< HEAD
-=======
 If you need to stop all jobs via mongo use:
 ```js
 mongo> db.jobs_dominator_3.update({_id:"dominatorId"}, {$set: {pausedJobs: ['*']}});
 ```
 The in-control server should observe the change and stop instantly. Use `{$unset: {pausedJobs: 1}}` or `{$set: {pausedJobs: []}}` to start all the queues again.
 
->>>>>>> dd298e4e45c6ea3ddafc8c9b18c9cca06b6f8d84
 ### Jobs.get
 
 `Jobs.get` allows you to get a job document by its document id.
@@ -323,7 +317,6 @@ Parameters:
 var success = Jobs.remove(docId);
 ```
 
-<<<<<<< HEAD
 ### Jobs.jobs
 
 `Jobs.jobs` gives access to an object of defined job functions:
@@ -332,8 +325,6 @@ var jobNames = Object.keys(Jobs.jobs);  // ['sendEmail', 'sendReminder']
 var nJobTypes = jobNames.length;        // 2
 ```
 
-=======
->>>>>>> dd298e4e45c6ea3ddafc8c9b18c9cca06b6f8d84
 ### Jobs.collection
 
 `Jobs.collection` allows you to access the MongoDB collection where the jobs are stored. Ideally, you should not require interaction with the database directly.
@@ -381,7 +372,6 @@ If any of these differences make this package unsuitable for you, please let me 
 - `Jobs.start()` and `Jobs.stop()` can be called on any server and whichever server is in control of the job queue will be notified.
 - `Jobs.cancel()` doesn't exist. Just remove it with [Jobs.remove()](#jobsremove) - I don't see the point in keeping old jobs lying around.
 - [Jobs.clear()](#jobsclear) can take additional `argument` parameters to only delete jobs matching those arguments.
-<<<<<<< HEAD
 - [Jobs.jobs](#jobsjobs) doesn't exist in msavin:sjobs
 
 ------
@@ -400,5 +390,3 @@ If any of these differences make this package unsuitable for you, please let me 
 
 #### 0.0.1 (2018-12-31)
 - First release.
-=======
->>>>>>> dd298e4e45c6ea3ddafc8c9b18c9cca06b6f8d84

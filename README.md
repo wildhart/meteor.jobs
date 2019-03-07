@@ -89,9 +89,14 @@ The configuration object supports `date`, `in`, `on`, and `priority`, all of whi
  - [Jobs.cancel](#jobscancel)
  - [Jobs.clear](#jobsclear)
  - [Jobs.remove](#jobsremove)
+ - [Jobs.jobs](#jobsjobs)
  - [Jobs.collection](#jobscollection)
  - [Repeating Jobs](#repeating-jobs)
  - [Bulk Operations](#bulk-operations)
+<<<<<<< HEAD
+ - [Version History](#version-history)
+=======
+>>>>>>> dd298e4e45c6ea3ddafc8c9b18c9cca06b6f8d84
 
 ### Jobs.configure
 
@@ -263,12 +268,15 @@ Jobs.stop(["sendReminder", "sendEmail"])
 ```
 Unlike msavin:sjobs, this function can be called on any server and whichever server is currently in control of the job queue will be notified.
 
+<<<<<<< HEAD
+=======
 If you need to stop all jobs via mongo use:
 ```js
 mongo> db.jobs_dominator_3.update({_id:"dominatorId"}, {$set: {pausedJobs: ['*']}});
 ```
 The in-control server should observe the change and stop instantly. Use `{$unset: {pausedJobs: 1}}` or `{$set: {pausedJobs: []}}` to start all the queues again.
 
+>>>>>>> dd298e4e45c6ea3ddafc8c9b18c9cca06b6f8d84
 ### Jobs.get
 
 `Jobs.get` allows you to get a job document by its document id.
@@ -315,6 +323,17 @@ Parameters:
 var success = Jobs.remove(docId);
 ```
 
+<<<<<<< HEAD
+### Jobs.jobs
+
+`Jobs.jobs` gives access to an object of defined job functions:
+```js
+var jobNames = Object.keys(Jobs.jobs);  // ['sendEmail', 'sendReminder']
+var nJobTypes = jobNames.length;        // 2
+```
+
+=======
+>>>>>>> dd298e4e45c6ea3ddafc8c9b18c9cca06b6f8d84
 ### Jobs.collection
 
 `Jobs.collection` allows you to access the MongoDB collection where the jobs are stored. Ideally, you should not require interaction with the database directly.
@@ -345,7 +364,7 @@ The job queue intelligently prevents lots of a single job dominating the job que
 If any of these differences make this package unsuitable for you, please let me know and I'll consider fixing.
 
 - This package doesn't keep a job history.
-- `failed` jobs are not retried.
+- `failed` jobs are not retried, unless they have already been rescheduled.
 - The Job configuration object doesn't support the `data` attribute - I never found any use for this.
 - The following [Jobs.configure()](#jobsconfigure) options are not available or different:
   - `interval` - this package doesn't regularly query the job queue for due jobs, instead it intelligently sets a timer for the next job.
@@ -362,3 +381,24 @@ If any of these differences make this package unsuitable for you, please let me 
 - `Jobs.start()` and `Jobs.stop()` can be called on any server and whichever server is in control of the job queue will be notified.
 - `Jobs.cancel()` doesn't exist. Just remove it with [Jobs.remove()](#jobsremove) - I don't see the point in keeping old jobs lying around.
 - [Jobs.clear()](#jobsclear) can take additional `argument` parameters to only delete jobs matching those arguments.
+<<<<<<< HEAD
+- [Jobs.jobs](#jobsjobs) doesn't exist in msavin:sjobs
+
+------
+
+## Version History
+
+#### 1.0.0 (2019-03-07)
+- Jobs which result in an error but have already been rescheduled will still run again at the rescheduled time.
+- Access to the list of defined job types with [Jobs.jobs](#jobsjobs).
+
+#### 0.0.3 (2019-01-17)
+- Can [start](#jobsstart)/[stop](#jobsstop) the job queue.
+
+#### 0.0.2 (2019-01-16)
+- Prevent a single job type from dominating the job queue (e.g. [bulk email sending](#bulk-operations)).
+
+#### 0.0.1 (2018-12-31)
+- First release.
+=======
+>>>>>>> dd298e4e45c6ea3ddafc8c9b18c9cca06b6f8d84

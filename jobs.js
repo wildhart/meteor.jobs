@@ -10,6 +10,7 @@ const dominatorId = "dominatorId";
 const Jobs = {
 	collection: new Mongo.Collection("jobs_data"),
 	dominatorCollection: new Mongo.Collection("jobs_dominator_3"),
+	jobs,
 };
 
 Jobs.collection._ensureIndex({name: 1, due: 1, state: 1});
@@ -30,12 +31,12 @@ Jobs.configure = function(config) {
 Jobs.register = function(newJobs) {
 	check(newJobs, Object);
 	Object.assign(jobs, newJobs);
-	settings.log && settings.log('Jobs', 'Jobs.register', Object.keys(jobs).length, Object.keys(newJobs).join(', '));
+	// settings.log && settings.log('Jobs', 'Jobs.register', Object.keys(jobs).length, Object.keys(newJobs).join(', '));
 };
 
 Jobs.run = function(name, ...args) {
 	check(name, String);
-	settings.log && settings.log('Jobs', 'Jobs.run', name, ...args);
+	settings.log && settings.log('Jobs', 'Jobs.run', name, args.length && args[0]);
 
 	var config = args.length && args.pop();
 	if (config && !isConfig(config)) {
@@ -100,9 +101,9 @@ Jobs.replicate = function(jobId, config) {
 Jobs.reschedule = function(jobId, config) {
 	check(jobId, String);
 	const date = getDateFromConfig(config);
-	var set = {due: date};
+	var set = {due: date, state: 'pending'};
 	if (config.priority) set.priority = config.priority;
-	const count = Jobs.collection.update({_id: jobId, state: 'pending'}, {$set: set});
+	const count = Jobs.collection.update({_id: jobId}, {$set: set});
 	settings.log && settings.log('Jobs', '    Jobs.reschedule', jobId, config, date, count);
 	if (typeof config.callback == 'function') config.callback(count==0, count);
 };
@@ -166,6 +167,18 @@ Jobs.start = function(jobNames) {
 
 	Jobs.dominatorCollection.upsert({_id: dominatorId}, update);
 	settings.log && settings.log('Jobs', 'startJobs', jobNames, update);
+<<<<<<< HEAD
+=======
+}
+
+Jobs.stop = function(jobNames) {
+	const update = {};
+	if (!jobNames || jobNames=='*') update.$set = {pausedJobs: ['*']}; // stop all jobs
+	else update.$addToSet = {pausedJobs: typeof jobNames=='string' ? jobNames : {$each: jobNames}};
+
+	Jobs.dominatorCollection.upsert({_id: dominatorId}, update);
+	settings.log && settings.log('Jobs', 'stopJobs', jobNames, update);
+>>>>>>> dd298e4e45c6ea3ddafc8c9b18c9cca06b6f8d84
 }
 
 Jobs.stop = function(jobNames) {
@@ -176,6 +189,8 @@ Jobs.stop = function(jobNames) {
 	Jobs.dominatorCollection.upsert({_id: dominatorId}, update);
 	settings.log && settings.log('Jobs', 'stopJobs', jobNames, update);
 }
+
+// Jobs.sharedSettings
 
 export { Jobs }
 
@@ -366,8 +381,7 @@ function executeJob(job) {
 	} catch(e) {
 		console.warn('Jobs', 'Error in job', job);
 		console.warn(e);
-		setJobState(job._id, 'failure');
-		action = 'failed'
+		if (action!='reschedule') self.failure();
 	}
 
 	if (!action) {

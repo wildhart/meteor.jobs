@@ -278,7 +278,7 @@ const queue = {
 	start() {
 		if (this._handle && this._handle!='paused') this.stop(); // this also clears any existing job timeout
 		const pausedJobs = (dominator.lastPing||{}).pausedJobs || [];
-		settings.lot && settings.log('Jobs', 'queue.start paused:', pausedJobs);
+		settings.log && settings.log('Jobs', 'queue.start paused:', pausedJobs);
 
 		// don't bother creating an observer if all jobs are paused
 		this._handle = pausedJobs[0]=='*' ? 'paused' : Jobs.collection.find({

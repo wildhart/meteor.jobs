@@ -278,7 +278,7 @@ const queue = {
 	start() {
 		if (this._handle && this._handle!='paused') this.stop(); // this also clears any existing job timeout
 		const pausedJobs = (dominator.lastPing||{}).pausedJobs || [];
-		console.log('Jobs', 'queue.start paused:', pausedJobs);
+		settings.lot && settings.log('Jobs', 'queue.start paused:', pausedJobs);
 
 		// don't bother creating an observer if all jobs are paused
 		this._handle = pausedJobs[0]=='*' ? 'paused' : Jobs.collection.find({
@@ -305,7 +305,7 @@ const queue = {
 		if (this._handle) this.start();
 	},
 	_observer(type, nextJob) {
-		console.log('Jobs', 'queue.observer', type, nextJob, nextJob && ((nextJob.due - new Date())/(60*60*1000)).toFixed(2)+'h');
+		settings.log && setings.log('Jobs', 'queue.observer', type, nextJob, nextJob && ((nextJob.due - new Date())/(60*60*1000)).toFixed(2)+'h');
 		if (this._timeout) Meteor.clearTimeout(this._timeout);
 		this._timeout = nextJob ? Meteor.setTimeout(()=>this._executeJobs(), nextJob.due - new Date()) : null;
 	},

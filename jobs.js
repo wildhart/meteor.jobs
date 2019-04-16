@@ -305,7 +305,7 @@ const queue = {
 		if (this._handle) this.start();
 	},
 	_observer(type, nextJob) {
-		settings.log && setings.log('Jobs', 'queue.observer', type, nextJob, nextJob && ((nextJob.due - new Date())/(60*60*1000)).toFixed(2)+'h');
+		settings.log && settings.log('Jobs', 'queue.observer', type, nextJob, nextJob && ((nextJob.due - new Date())/(60*60*1000)).toFixed(2)+'h');
 		if (this._timeout) Meteor.clearTimeout(this._timeout);
 		this._timeout = nextJob ? Meteor.setTimeout(()=>this._executeJobs(), nextJob.due - new Date()) : null;
 	},

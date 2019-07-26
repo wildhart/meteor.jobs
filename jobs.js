@@ -178,17 +178,6 @@ Jobs.stop = function(jobNames) {
 	settings.log && settings.log('Jobs', 'stopJobs', jobNames, update);
 }
 
-Jobs.stop = function(jobNames) {
-	const update = {};
-	if (!jobNames || jobNames=='*') update.$set = {pausedJobs: ['*']}; // stop all jobs
-	else update.$addToSet = {pausedJobs: typeof jobNames=='string' ? jobNames : {$each: jobNames}};
-
-	Jobs.dominatorCollection.upsert({_id: dominatorId}, update);
-	settings.log && settings.log('Jobs', 'stopJobs', jobNames, update);
-}
-
-// Jobs.sharedSettings
-
 export { Jobs }
 
 /********************************* Controller *********************/
@@ -331,8 +320,8 @@ const queue = {
 						executeJob(job);
 						doneJobs.push(job.name); // don't do this job type again until we've tried other jobs.
 					}
-				} while (job);
-			} while (doneJobs.length);
+				} while (dominator.lastPing.pausedJobs.indexOf('*')==-1 && job);
+			} while (dominator.lastPing.pausedJobs.indexOf('*')==-1 && doneJobs.length);
 		} catch(e) {
 			console.warn('Jobs', 'executeJobs ERROR');
 			console.warn(e);

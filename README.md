@@ -378,7 +378,16 @@ If any of these differences make this package unsuitable for you, please let me 
 
 ## Version History
 
-#### 1.0.0 (2019-03-07)
+#### 1.0.5 (2019-10-02)
+- Prevent console.logging done jobs.
+
+#### 1.0.4 (2019-07-27)
+- Allow job queue to be paused while in executing loop.
+
+#### 1.0.3 (2019-04-16)
+- Fix bug when logging observer.
+
+#### 1.0.1 (2019-03-07)
 - Jobs which result in an error but have already been rescheduled will still run again at the rescheduled time.
 - Access to the list of defined job types with [Jobs.jobs](#jobsjobs).
 

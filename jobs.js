@@ -363,7 +363,7 @@ function executeJob(job) {
 
 	try {
 		jobs[job.name].apply(self, job.arguments);
-		console.log('Jobs', '    Done job', job.name, 'result='+action);
+		settings.log && settings.log('Jobs', '    Done job', job.name, 'result='+action);
 	} catch(e) {
 		console.warn('Jobs', 'Error in job', job);
 		console.warn(e);

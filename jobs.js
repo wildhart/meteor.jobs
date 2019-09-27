@@ -345,19 +345,19 @@ function executeJob(job) {
 		},
 		reschedule: function(config) {
 			action = 'reschedule';
-			Jobs.reschedule(job._id, config);
+			return Jobs.reschedule(job._id, config);
 		},
 		remove: function() {
 			action = 'remove';
-			Jobs.remove(job._id);
+			return Jobs.remove(job._id);
 		},
 		success: function() {
 			action = 'success';
-			setJobState(job._id, action);
+			return setJobState(job._id, action);
 		},
 		failure: function() {
 			action = 'failure';
-			setJobState(job._id, action);
+			return setJobState(job._id, action);
 		},
 	};
 

@@ -378,9 +378,10 @@ If any of these differences make this package unsuitable for you, please let me 
 
 ## Version History
 
-#### 1.0.7 (2019-09-27)
+#### 1.0.8 (2019-09-27)
 - Fix bug when using months to set the job time.
 - Add return values to this.remove() etc within job.
+- Fix observer/timeout race condition executing same job twice
 
 #### 1.0.5 (2019-09-02)
 - Prevent console.logging done jobs.

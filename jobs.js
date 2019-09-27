@@ -203,7 +203,7 @@ const dominator = {
 		});
 
 		this.lastPing = Jobs.dominatorCollection.findOne();
-		const lastPingIsOld = this.lastPing && this.lastPing.date && this.lastPing.date.valueOf() < new Date().valueOf() - settings.maxWait;
+		const lastPingIsOld = this.lastPing && this.lastPing.date && this.lastPing.date.valueOf() < Date.now() - settings.maxWait;
 		settings.log && settings.log('Jobs', 'startup', this.serverId, JSON.stringify(this.lastPing), 'isOld='+lastPingIsOld);
 
 		// need !this.lastPing.serverId on following line in case Jobs.start() or Jobs.stop() updates pausedJobs before
@@ -264,6 +264,7 @@ const dominator = {
 const queue = {
 	_handle: null,
 	_timeout: null,
+	_executing: false,
 	start() {
 		if (this._handle && this._handle!='paused') this.stop(); // this also clears any existing job timeout
 		const pausedJobs = (dominator.lastPing||{}).pausedJobs || [];
@@ -294,18 +295,24 @@ const queue = {
 		if (this._handle) this.start();
 	},
 	_observer(type, nextJob) {
-		settings.log && settings.log('Jobs', 'queue.observer', type, nextJob, nextJob && ((nextJob.due - new Date())/(60*60*1000)).toFixed(2)+'h');
+		settings.log && settings.log('Jobs', 'queue.observer', type, nextJob, nextJob && ((nextJob.due - Date.now())/(60*60*1000)).toFixed(2)+'h');
 		if (this._timeout) Meteor.clearTimeout(this._timeout);
-		this._timeout = nextJob ? Meteor.setTimeout(()=>this._executeJobs(), nextJob.due - new Date()) : null;
+		this._timeout = nextJob && !this._executing ? Meteor.setTimeout(()=> {
+			this._timeout = null;
+			this._executeJobs()
+		}, nextJob.due - Date.now()) : null;
 	},
 	_executeJobs() {
-		settings.log && settings.log('Jobs', 'executeJobs', 'paused:', dominator.lastPing.pausedJobs);
-		this.stop(); // ignore job queue changes while executing jobs. Will restart observer with .start() at end
+		if (this._executing) return console.warn('already executing!');
+		this._executing = true; // protect against observer/timeout race condition
 		try {
+			settings.log && settings.log('Jobs', 'executeJobs', 'paused:', dominator.lastPing.pausedJobs);
+			this.stop(); // ignore job queue changes while executing jobs. Will restart observer with .start() at end
 			// need to prevent 1000s of the same job type from hogging the job queue and delaying other jobs
 			// after running a job, add its job.name to doneJobs, then find the next job excluding those in doneJobs
 			// if no other jobs can be found then clear doneJobs to allow the same job to run again.
-			var job, doneJobs;
+			let job, doneJobs;
+			let lastJobId = 'not null'; // protect against stale read
 			do {
 				doneJobs = [];
 				do {
@@ -315,8 +322,10 @@ const queue = {
 						state: "pending",
 						due: {$lte: new Date()},
 						name: {$nin: doneJobs.concat(dominator.lastPing.pausedJobs)}, // give other job types a chance...
+						_id: {$ne: lastJobId}, // protect against stale reads of the job we just executed
 					}, {sort: {due: 1, priority: -1}});
 					if (job) {
+						lastJobId = job._id;
 						executeJob(job);
 						doneJobs.push(job.name); // don't do this job type again until we've tried other jobs.
 					}
@@ -326,6 +335,7 @@ const queue = {
 			console.warn('Jobs', 'executeJobs ERROR');
 			console.warn(e);
 		}
+		this._executing = false;
 		this.start();
 	}
 };

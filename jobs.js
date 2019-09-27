@@ -389,18 +389,19 @@ function getDateFromConfig(config) {
 		on: Match.Maybe(Object),
 	}));
 
-	var currentDate = config.date || new Date();
+	let currentDate = config.date || new Date();
+	let newNumber, fn;
 
 	Object.keys(config).forEach(function(key1) {
 		if (["in","on"].indexOf(key1) > -1) {
 			Object.keys(config[key1]).forEach(function(key2) {
 				try {
-					const newNumber = Number(config[key1][key2]);
+					newNumber = Number(config[key1][key2]);
 					if (isNaN(newNumber)) {
 						console.warn('Jobs', "invalid type was input: " + key1 + "." + key2, newNumber)
 					} else {
 						// convert month(s) => months (etc), and day(s) => date and year(s) => fullYear
-						let fn = (key2+"s").replace('ss', 's').replace('days','date').replace('years','fullYear');
+						fn = (key2+"s").replace('ss', 's').replace('days','date').replace('years','fullYear').replace('months','month');
 						// convert months => Months
 						fn = fn.charAt(0).toUpperCase() + fn.slice(1);
 						// if key1=='in' currentDate.setMonth(newNumber + currentDate.getMonth())

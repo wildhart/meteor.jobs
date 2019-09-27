@@ -378,7 +378,10 @@ If any of these differences make this package unsuitable for you, please let me 
 
 ## Version History
 
-#### 1.0.5 (2019-10-02)
+#### 1.0.6 (2019-09-27)
+- Fix bug when using months to set the job time.
+
+#### 1.0.5 (2019-09-02)
 - Prevent console.logging done jobs.
 
 #### 1.0.4 (2019-07-27)

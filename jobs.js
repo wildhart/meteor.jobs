@@ -7,6 +7,9 @@ const settings = {
 };
 const dominatorId = "dominatorId";
 
+// cap timeout limit to 24 hours to avoid Node.js limit https://github.com/wildhart/meteor.jobs/issues/5
+const MAX_TIMEOUT_MS = 24 *3600 * 1000;
+
 const Jobs = {
 	collection: new Mongo.Collection("jobs_data"),
 	dominatorCollection: new Mongo.Collection("jobs_dominator_3"),
@@ -297,10 +300,15 @@ const queue = {
 	_observer(type, nextJob) {
 		settings.log && settings.log('Jobs', 'queue.observer', type, nextJob, nextJob && ((nextJob.due - Date.now())/(60*60*1000)).toFixed(2)+'h');
 		if (this._timeout) Meteor.clearTimeout(this._timeout);
+
+		// cap timeout limit to 24 hours to avoid Node.js limit https://github.com/wildhart/meteor.jobs/issues/5
+		let msTillNextJob = nextJob && (nextJob.due - Date.now());
+		if (msTillNextJob > MAX_TIMEOUT_MS) msTillNextJob = MAX_TIMEOUT_MS;
+
 		this._timeout = nextJob && !this._executing ? Meteor.setTimeout(()=> {
 			this._timeout = null;
 			this._executeJobs()
-		}, nextJob.due - Date.now()) : null;
+		}, msTillNextJob) : null;
 	},
 	_executeJobs() {
 		if (this._executing) return console.warn('already executing!');

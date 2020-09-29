@@ -301,7 +301,7 @@ var count = Jobs.clear(state, jobName, ...arguments, callback);
 e.g:
 count = Jobs.clear(); 		// remove all completed jobs (success or failure)
 count = Jobs.clear('*');	// remove all jobs
-count = Jobs.clear('failed', 'sendEmail', 'jony@apple.com', function(err, count) {console.log(err, count)});
+count = Jobs.clear('failure', 'sendEmail', 'jony@apple.com', function(err, count) {console.log(err, count)});
 ```
 Parameters:
 * `state` for selecting a job state (either `pending`, `success`, `failure`, or `*` to select all of them), or omit to all except `pending` jobs.

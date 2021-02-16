@@ -92,6 +92,7 @@ The configuration object supports `date`, `in`, `on`, and `priority`, all of whi
  - [Jobs.jobs](#jobsjobs)
  - [Jobs.collection](#jobscollection)
  - [Repeating Jobs](#repeating-jobs)
+ - [Async Jobs/Promises](#async-jobs)
  - [Bulk Operations](#bulk-operations)
  - [Version History](#version-history)
 
@@ -150,7 +151,7 @@ Each job is bound with a set of functions to give you maximum control over how t
 
 Each job must be resolved with success, failure, reschedule, and/or remove.
 
-See [Repeating Jobs](#repeating-jobs)
+See [Repeating Jobs](#repeating-jobs) and [Async Jobs/Promises](#async-jobs)
 
 ### Jobs.run
 
@@ -345,6 +346,25 @@ Jobs.run('processMonthlyPayments', {singular: true});
 
 Since this package doesn't keep a job history (compared with msavin:sjobs), you can use `this.reschedule()` indefinitely without polluting the jobs database, instead of having to use `this.replicate()` followed by `this.remove()`.
 
+## Async Jobs
+
+The job function can use `async/await` or return a promise:
+```javascript
+Jobs.register({
+	async asyncJob(...args) {
+		await new Promise(resolve => Meteor.setTimeout(() => resolve(0), 4000));
+		this.remove();
+	},
+	promiseJob(...args) {
+		return new Promise(resolve => Meteor.setTimeout(() => {
+			this.remove();
+			resolve(0);
+		}, 8000));
+	},
+});
+```
+This defers the error message `'Job was not resolved with success, failure, reschedule or remove'` until the promise resolves.  While jobs are executing their status is set to `'executing'`.
+
 ## Bulk Operations
 
 The job queue intelligently prevents lots of a single job dominating the job queue, so feel free to use this package to safely schedule bulk operations, e.g, sending 1000s of emails. Although it may take some time to send all of these emails, any other jobs which are scheduled to run while they are being sent will still be run on time.  Run each operation as its own job (e.g, 1000 separate `"sendSingleEmail"` jobs rather than a single `"send1000Emails"` job.  The job queue will run all 1000 `"sendSingleEmail"` jobs in sequence, but after each job it will check if any other jobs need to run first.
@@ -377,6 +397,13 @@ If any of these differences make this package unsuitable for you, please let me 
 ------
 
 ## Version History
+
+#### 1.0.10 (2021-02-17)
+- Better support for [Async Jobs/Promises](#async-jobs). Fixes #7.
+- While jobs are executing their status is set to `'executing'`.
+
+#### 1.0.9 (2020-09-25)
+- Capped timeout to 24 hours to avoid node limit. Fixes #5.
 
 #### 1.0.8 (2019-09-27)
 - Fix bug when using months to set the job time.

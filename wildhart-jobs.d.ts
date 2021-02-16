@@ -17,7 +17,7 @@ declare module 'meteor/wildhart:jobs' {
             callback?: Function;
         }
 
-        export type JobStatus = "pending" | "success" | "failure";
+        export type JobStatus = "pending" | "success" | "failure" | "executing";
 
         interface JobDocument {
             _id: string,

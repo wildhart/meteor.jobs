@@ -21,7 +21,7 @@ export namespace Jobs {
 		callback?: Function;
 	}
 
-	export type JobStatus = "pending" | "success" | "failure";
+	export type JobStatus = "pending" | "success" | "failure" | "executing";
 
 	export interface JobDocument {
 		_id: string,
@@ -273,7 +273,7 @@ export namespace Jobs {
 			else this._observer(this.lastPing);															// another server is recently in control, set a timer to check the ping...
 		}
 
-		_observer(newPing: DominatorDocument) {
+		private _observer(newPing: DominatorDocument) {
 			log('Jobs', 'dominator.observer', newPing);
 			if (this.lastPing && this.lastPing.serverId==this.serverId && newPing.serverId!=this.serverId) {
 				// we were in control but another server has taken control
@@ -299,20 +299,20 @@ export namespace Jobs {
 			}
 		}
 
-		_takeControl(reason: string) {
+		private _takeControl(reason: string) {
 			log('Jobs', 'takeControl', reason);
 			this._ping();
 			queue.start();
 		}
 
-		_relinquishControl() {
+		private _relinquishControl() {
 			log('Jobs', 'relinquishControl');
 			Meteor.clearInterval(this._pingInterval);
 			this._pingInterval = null;
 			queue.stop();
 		}
 
-		_ping() {
+		private _ping() {
 			if (!this._pingInterval) this._pingInterval = Meteor.setInterval(()=>this._ping(), settings.maxWait*0.8);
 			const newPing = {
 				serverId: this.serverId,
@@ -365,7 +365,7 @@ export namespace Jobs {
 			if (this._handle) this.start();
 		}
 
-		_observer(type: string, nextJob: JobDocument) {
+		private _observer(type: string, nextJob: JobDocument) {
 			log('Jobs', 'queue.observer', type, nextJob, nextJob && ((nextJob.due.valueOf() - Date.now())/(60*60*1000)).toFixed(2)+'h');
 			if (this._timeout) Meteor.clearTimeout(this._timeout);
 
@@ -379,27 +379,34 @@ export namespace Jobs {
 			}, msTillNextJob) : null;
 		}
 
-		_executeJobs() {
+		private _executeJobs() {
 			if (this._executing) return console.warn('already executing!');
 			this._executing = true; // protect against observer/timeout race condition
 			try {
 				log('Jobs', 'executeJobs', 'paused:', dominator.lastPing.pausedJobs);
-				this.stop(); // ignore job queue changes while executing jobs. Will restart observer with .start() at end
+
+				// ignore job queue changes while executing jobs. Will restart observer with .start() at end
+				this.stop();
+
 				// need to prevent 1000s of the same job type from hogging the job queue and delaying other jobs
 				// after running a job, add its job.name to doneJobs, then find the next job excluding those in doneJobs
 				// if no other jobs can be found then clear doneJobs to allow the same job to run again.
 				let job: JobDocument;
 				let doneJobs: string[];
-				let lastJobId = 'not null'; // protect against stale read
+
+				// protect against stale read
+				let lastJobId = 'not null';
+
 				do {
 					doneJobs = [];
 					do {
 						// findOne() is actually async but is wrapped in a Fiber, so we don't need to worry about blocking the server
 						// always use the live version of dominator.lastPing.pausedJobs in case jobs are paused/restarted while executing
+						const lastPing = dominatorCollection.findOne({}, {fields: {pausedJobs: 1}});
 						job = collection.findOne({
 							state: "pending",
 							due: {$lte: new Date()},
-							name: {$nin: doneJobs.concat(dominator.lastPing.pausedJobs)}, // give other job types a chance...
+							name: {$nin: doneJobs.concat(lastPing.pausedJobs)}, // give other job types a chance...
 							_id: {$ne: lastJobId}, // protect against stale reads of the job we just executed
 						}, {sort: {due: 1, priority: -1}});
 						if (job) {
@@ -449,16 +456,30 @@ export namespace Jobs {
 			},
 		};
 
+		let isAsync = false;
+
 		try {
-			jobs[job.name].apply(self, job.arguments);
-			log('Jobs', '    Done job', job.name, 'result='+action);
+			setJobState(job._id, 'executing');
+			const res = jobs[job.name].apply(self, job.arguments);
+			if (res?.then) {
+				isAsync = true;
+				res.then(() => {
+					log('Jobs', '    Done async job', job.name, 'result='+action);
+					if (!action) {
+						console.warn('Jobs', 'Async Job was not resolved with success, failure, reschedule or remove', job);
+						setJobState(job._id, 'failure');
+					}
+				});
+			} else {
+				log('Jobs', '    Done job', job.name, 'result='+action);
+			}
 		} catch(e) {
 			console.warn('Jobs', 'Error in job', job);
 			console.warn(e);
-			if (action!='reschedule') self.failure();
+			if (action != 'reschedule') self.failure();
 		}
 
-		if (!action) {
+		if (!isAsync && !action) {
 			console.warn('Jobs', 'Job was not resolved with success, failure, reschedule or remove', job);
 			setJobState(job._id, 'failure');
 		}

@@ -363,7 +363,10 @@ Jobs.register({
 	},
 });
 ```
-This defers the error message `'Job was not resolved with success, failure, reschedule or remove'` until the promise resolves.  While jobs are executing their status is set to `'executing'`.
+This defers the error message `'Job was not resolved with success, failure, reschedule or remove'` until the promise resolves.  Note that:
+* While jobs are executing their status is set to `'executing'`.
+* Other jobs of the same type will still run when scheduled while asynchronous jobs are executing.
+* Asynchronous code may need to be wrapped in [`Meteor.bindEnvironment()`](https://guide.meteor.com/using-npm-packages.html#bind-environment).
 
 ## Bulk Operations
 

@@ -8,7 +8,7 @@ Package.describe({
 
 Package.onUse(function(api) {
 	api.versionsFrom('1.3');
-	api.use(["typescript", "mongo", "random", "ecmascript", "check"], "server");
+	api.use(["typescript@3.7.6", "mongo", "random", "ecmascript", "check"], "server");
 	api.mainModule("jobs.ts", "server");
 	api.export(["Jobs"]);
 });

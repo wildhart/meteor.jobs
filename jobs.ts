@@ -12,6 +12,7 @@ export namespace Jobs {
 		log: typeof console.log | boolean;
 		autoStart: boolean;
 		setServerId?: string | Function;
+		defaultCompletion?: 'success' | 'remove';
 	}
 
 	export interface JobConfig {
@@ -72,6 +73,7 @@ export namespace Jobs {
 			setServerId: Match.Maybe(Match.OneOf(String, Function)),
 			log: Match.Maybe(Match.OneOf(undefined, null, Boolean, Function)),
 			autoStart: Match.Maybe(Boolean),
+			defaultCompletion: Match.Maybe(Match.Where((val => /^(success|remove)$/.test(val)))),
 		});
 		Object.assign(settings, config);
 		if (settings.log === true) settings.log = console.log;
@@ -457,6 +459,18 @@ export namespace Jobs {
 		};
 
 		let isAsync = false;
+		function completed() {
+			if (!action) {
+				if (settings.defaultCompletion == 'success') {
+					setJobState(job._id, 'success');
+				} else if (settings.defaultCompletion == 'remove') {
+					remove(job._id);
+				} else {
+					console.warn('Jobs', "Job was not resolved with success, failure, reschedule or remove. Consider using the 'defaultCompletion' option.", job);
+					setJobState(job._id, 'failure');
+				}
+			}
+		}
 
 		try {
 			setJobState(job._id, 'executing');
@@ -465,10 +479,7 @@ export namespace Jobs {
 				isAsync = true;
 				res.then(() => {
 					log('Jobs', '    Done async job', job.name, 'result='+action);
-					if (!action) {
-						console.warn('Jobs', 'Async Job was not resolved with success, failure, reschedule or remove', job);
-						setJobState(job._id, 'failure');
-					}
+					completed();
 				});
 			} else {
 				log('Jobs', '    Done job', job.name, 'result='+action);
@@ -479,9 +490,8 @@ export namespace Jobs {
 			if (action != 'reschedule') self.failure();
 		}
 
-		if (!isAsync && !action) {
-			console.warn('Jobs', 'Job was not resolved with success, failure, reschedule or remove', job);
-			setJobState(job._id, 'failure');
+		if (!isAsync) {
+			completed();
 		}
 	}
 

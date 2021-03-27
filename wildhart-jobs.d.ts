@@ -15,6 +15,7 @@ declare module 'meteor/wildhart:jobs' {
             due?: Date;
             state: string;
             callback?: Function;
+            defaultCompletion?: 'success' | 'remove';
         }
 
         export type JobStatus = "pending" | "success" | "failure" | "executing";

@@ -102,12 +102,26 @@ The configuration object supports `date`, `in`, `on`, and `priority`, all of whi
 
 ```javascript
 Jobs.configure({
-	maxWait: Number,                  // (milliseconds) specify how long the server could be inactive before another server takes on the master role (default = 5min)
-	startupDelay: Number,             // (milliseconds) specify how long after server startup the package should start running
-	setServerId: String || Function,  // determine how to set the serverId - see below. (default = random string)
-	log: Boolean || Function,         // determine if/how to log the package outputs (defalt = console.log)
-	autoStart: Boolean,               // specify if all job queues should start automatically on first launch (default = true)...
-	                                  //  ... after server relaunch the list of paused queues is restored from the database.
+    // (milliseconds) specify how long the server could be inactive before another server
+	// takes on the master role (default = 5min)
+	maxWait: Number,
+
+	// (milliseconds) specify how long after server startup the package should start running
+	startupDelay: Number,
+
+	// determine how to set the serverId - see below. (default = random string)
+	setServerId: String || Function,
+
+	// determine if/how to log the package outputs (defalt = console.log)
+	log: Boolean || Function,
+
+	// specify if all job queues should start automatically on first launch (default = true)...
+	//  ... after server relaunch the list of paused queues is restored from the database.
+	autoStart: Boolean,
+
+	// whether to mark successfull just as successful, or remove them,
+	// otherwise you have to resolve every job with this.succesS() or this.remove()
+	defaultCompletion: 'success' | 'remove',
 })
 ```
 `setServerId` - In a **multi-server deployment**, jobs are only executed on one server.  Each server should have a unique ID so that it knows if it is control of the job queue or not. You can provide a function which returns a serverId from somewhere (e.g. from an environment variable) or just use the default of a random string.  In a **single-server deployment** set this to a static string so that the server knows that it is always in control and can take control more quickly after a reboot.
@@ -400,6 +414,9 @@ If any of these differences make this package unsuitable for you, please let me 
 ------
 
 ## Version History
+
+#### 1.0.11 (2021-03-28)
+- Added the `'defaultCompletion'` [Jobs.configure](#jobsconfigure) option. Suggested in #10.
 
 #### 1.0.10 (2021-02-17)
 - Better support for [Async Jobs/Promises](#async-jobs). Fixes #7.

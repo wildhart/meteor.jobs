@@ -415,7 +415,13 @@ If any of these differences make this package unsuitable for you, please let me 
 
 ## Version History
 
-#### 1.0.11 (2021-03-28)
+#### 1.0.13 (2021-08-23)
+- Fixed not accepting `startUpDelay` in `Jobs.Configure`. Fixes [#13](/issues/13).
+
+#### 1.0.12 (2021-03-30)
+- Removed typescript verison constraint.
+
+#### 1.0.10 (2021-02-17)
 - Added the `'defaultCompletion'` [Jobs.configure](#jobsconfigure) option. Suggested in [#10](/issues/10).
 
 #### 1.0.10 (2021-02-17)

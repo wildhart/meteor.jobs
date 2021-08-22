@@ -74,6 +74,7 @@ export namespace Jobs {
 			log: Match.Maybe(Match.OneOf(undefined, null, Boolean, Function)),
 			autoStart: Match.Maybe(Boolean),
 			defaultCompletion: Match.Maybe(Match.Where((val => /^(success|remove)$/.test(val)))),
+			startupDelay: Match.Maybe(Number),
 		});
 		Object.assign(settings, config);
 		if (settings.log === true) settings.log = console.log;

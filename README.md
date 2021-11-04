@@ -207,6 +207,8 @@ The configuration object supports the following inputs:
 	- If a job is marked as unique, it will only be scheduled if no other job exists with the same arguments
 * **`singular`** - Boolean
 	- If a job is marked as singular, it will only be scheduled if no other job is **pending** with the same arguments
+* **`awaitAsync`** - Boolean
+	- If an [async job](#asyncjobs) with run with `awaitAsync: true` is running, then no other job of the same name will start until the running job has completed.
 - **`callback`** - Function
 	- Run a callback function after scheduling the job
 
@@ -379,7 +381,7 @@ Jobs.register({
 ```
 This defers the error message `'Job was not resolved with success, failure, reschedule or remove'` until the promise resolves.  Note that:
 * While jobs are executing their status is set to `'executing'`.
-* Other jobs of the same type will still run when scheduled while asynchronous jobs are executing.
+* Other jobs of the same type will still run when scheduled while asynchronous jobs are executing, unless the running job was configured with `awaitSync: true`, in which case the pending job will wait until the previous job of that name has completed.
 * Asynchronous code may need to be wrapped in [`Meteor.bindEnvironment()`](https://guide.meteor.com/using-npm-packages.html#bind-environment).
 
 ## Bulk Operations
@@ -414,6 +416,9 @@ If any of these differences make this package unsuitable for you, please let me 
 ------
 
 ## Version History
+
+#### 1.0.14 (2021-11-04)
+- Added `awaitAsync: true` option for [async jobs](#asyncjobs). Fixes [#14](/issues/14).
 
 #### 1.0.13 (2021-08-23)
 - Fixed not accepting `startUpDelay` in `Jobs.Configure`. Fixes [#13](/issues/13).

@@ -19,6 +19,9 @@ export namespace Jobs {
 		priority: number;
 		due: Date;
 		state: string;
+		awaitAsync: boolean;
+		unique: boolean;
+		singular: boolean;
 		callback?: Function;
 	}
 
@@ -32,6 +35,7 @@ export namespace Jobs {
 		due: Date,
 		priority: number,
 		created: Date,
+		awaitAsync?: boolean,
 	}
 
 	export interface JobThisType {
@@ -77,7 +81,9 @@ export namespace Jobs {
 			startupDelay: Match.Maybe(Number),
 		});
 		Object.assign(settings, config);
-		if (settings.log === true) settings.log = console.log;
+		if (settings.log === true) {
+			settings.log = console.log;
+		}
 		log('Jobs', 'Jobs.configure', Object.keys(config));
 	}
 
@@ -91,21 +97,23 @@ export namespace Jobs {
 		check(name, String);
 		log('Jobs', 'Jobs.run', name, args.length && args[0]);
 
-		var config = args.length && args.pop();
+		var config = args.length && args.pop() as Partial<JobConfig> || null;
 		if (config && !isConfig(config)) {
 			args.push(config);
-			config = false;
+			config = null;
 		}
 		var error;
-		if (config && config.unique) { // If a job is marked as unique, it will only be scheduled if no other job exists with the same arguments
+		if (config?.unique) { // If a job is marked as unique, it will only be scheduled if no other job exists with the same arguments
 			if (count(name, ...args)) error = "Unique job already exists";
 		}
-		if (config && config.singular) { // If a job is marked as singular, it will only be scheduled if no other job is PENDING with the same arguments
+		if (config?.singular) { // If a job is marked as singular, it will only be scheduled if no other job is PENDING with the same arguments
 			if (countPending(name, ...args)) error = 'Singular job already exists';
 		}
 		if (error) {
-			log('Jobs', '  '+error);
-			if (config && typeof config.callback =='function') config.callback(error, null);
+			log('Jobs', '  ' + error);
+			if (typeof config?.callback =='function') {
+				config.callback(error, null);
+			}
 			return false;
 		}
 		const jobDoc: Mongo.OptionalId<JobDocument> = {
@@ -113,8 +121,9 @@ export namespace Jobs {
 			arguments: args,
 			state: 'pending',
 			due: config && getDateFromConfig(config) || new Date(),
-			priority: config && config.priority || 0,
+			priority: config?.priority || 0,
 			created: new Date(),
+			awaitAsync: config?.awaitAsync || undefined,
 		};
 		const jobId = collection.insert(jobDoc);
 		if (jobId) {
@@ -123,7 +132,9 @@ export namespace Jobs {
 			error = true;
 		}
 
-		if (config && typeof config.callback=='function') config.callback(error, jobId && jobDoc);
+		if (typeof config?.callback == 'function') {
+			config.callback(error, jobId && jobDoc);
+		}
 		return error ? false : jobDoc as JobDocument;
 	}
 
@@ -131,8 +142,14 @@ export namespace Jobs {
 		check(jobId, String);
 		log('Jobs', 'Jobs.execute', jobId);
 		const job = collection.findOne(jobId);
-		if (!job) return console.warn('Jobs', 'Jobs.execute', 'JOB NOT FOUND', jobId);
-		if (job.state != 'pending') return console.warn('Jobs', 'Jobs.execute', 'JOB IS NOT PENDING', job)
+		if (!job) {
+			console.warn('Jobs', 'Jobs.execute', 'JOB NOT FOUND', jobId);
+			return;
+		}
+		if (job.state != 'pending') {
+			console.warn('Jobs', 'Jobs.execute', 'JOB IS NOT PENDING', job);
+			return;
+		}
 
 		executeJob(job);
 	}
@@ -141,7 +158,10 @@ export namespace Jobs {
 		check(jobId, String);
 		const date = getDateFromConfig(config);
 		const job = collection.findOne(jobId);
-		if (!job) return console.warn('Jobs', '    Jobs.replicate', 'JOB NOT FOUND', jobId), null;
+		if (!job) {
+			console.warn('Jobs', '    Jobs.replicate', 'JOB NOT FOUND', jobId);
+			return null;
+		}
 
 		delete job._id;
 		job.due = date;
@@ -155,10 +175,14 @@ export namespace Jobs {
 		check(jobId, String);
 		const date = getDateFromConfig(config);
 		var set: Partial<JobDocument> = {due: date, state: 'pending'};
-		if (config.priority) set.priority = config.priority;
+		if (config.priority) {
+			set.priority = config.priority;
+		}
 		const count = collection.update({_id: jobId}, {$set: set});
 		log('Jobs', '    Jobs.reschedule', jobId, config, date, count);
-		if (typeof config.callback == 'function') config.callback(count==0, count);
+		if (typeof config.callback == 'function') {
+			config.callback(count==0, count);
+		}
 	}
 
 	export function remove(jobId: string) {
@@ -167,56 +191,68 @@ export namespace Jobs {
 		return count > 0;
 	}
 
-	export function clear(state: '*' | JobStatus | JobStatus[], jobName: string, ...args: any) {
-		const query: Mongo.Query<JobDocument> = {}
+	export function clear(state: '*' | JobStatus | JobStatus[], jobName: string, ...args: any[]) {
+		const query: Mongo.Query<JobDocument> = {
+			state: state === "*" ? {$exists: true}
+				: typeof state === "string" ? state as JobStatus
+				: Array.isArray(state) ? {$in: state}
+				: {$in: ["success", "failure"]}
+		};
 
-		if (state === "*") query.state = {$exists: true};
-		else if (typeof state === "string") query.state = state as JobStatus;
-		else if (Array.isArray(state)) query.state = {$in: state};
-		else query.state = {$in: ["success", "failure"]};
+		if (typeof jobName === "string") {
+			query.name = jobName;
+		} else if (typeof jobName === "object") {
+			query.name = {$in: jobName};
+		}
 
-		if (typeof jobName === "string") query.name = jobName;
-		else if (typeof jobName === "object") query.name = {$in: jobName};
-
-		const callback = args.length && typeof args[args.length-1]=='function' ? args.pop() : false;
-		for (var a=0; a<args.length; a++) query["arguments."+a] = args[a];
+		const callback = args.length && typeof args[args.length - 1] == 'function' ? args.pop() : null;
+		args.forEach((arg, index) => query["arguments." + index] = arg);
 
 		const count = collection.remove(query);
 		log('Jobs', 'Jobs.clear', count, query);
-		if (typeof callback == 'function') callback(null, count);
+		callback?.(null, count);
+
 		return count;
 	}
 
-	export function findOne(jobName: string, ...args: any) {
+	export function findOne(jobName: string, ...args: any[]) {
 		check(jobName, String);
-		const query: Mongo.Query<JobDocument> = {name: jobName};
-		for (var a=0; a<args.length; a++) query["arguments."+a] = args[a];
+		const query: Mongo.Query<JobDocument> = {
+			name: jobName,
+		};
+		args.forEach((arg, index) => query["arguments." + index] = arg);
 		return collection.findOne(query);
 	}
 
-	export function count(jobName: string, ...args: any) {
+	export function count(jobName: string, ...args: any[]) {
 		check(jobName, String);
-		const query: Mongo.Query<JobDocument> = {name: jobName};
-		for (var a=0; a<args.length; a++) query["arguments."+a] = args[a];
+		const query: Mongo.Query<JobDocument> = {
+			name: jobName,
+		};
+		args.forEach((arg, index) => query["arguments." + index] = arg);
 		const count = collection.find(query).count();
 		return count;
 	};
 
-	export function countPending(jobName: string, ...args: any) {
+	export function countPending(jobName: string, ...args: any[]) {
 		check(jobName, String);
 		const query: Mongo.Query<JobDocument>  = {
 			name: jobName,
 			state: 'pending',
 		};
-		for (var a=0; a<args.length; a++) query["arguments."+a] = args[a];
+		args.forEach((arg, index) => query["arguments." + index] = arg);
 		const count = collection.find(query).count();
 		return count;
 	}
 
 	export function start(jobNames: string[] | string) {
 		const update: Mongo.Modifier<DominatorDocument> = {}
-		if (!jobNames || jobNames=='*') update.$set = {pausedJobs: []}; // clear the pausedJobs list, start all jobs
-		else update.$pullAll = {pausedJobs: typeof jobNames=='string' ? [jobNames] : jobNames};
+		if (!jobNames || jobNames == '*') {
+			// clear the pausedJobs list, start all jobs
+			update.$set = {pausedJobs: []};
+		} else {
+			update.$pullAll = {pausedJobs: typeof jobNames=='string' ? [jobNames] : jobNames};
+		}
 
 		dominatorCollection.upsert({_id: dominatorId}, update);
 		log('Jobs', 'startJobs', jobNames, update);
@@ -224,8 +260,11 @@ export namespace Jobs {
 
 	export function stop(jobNames: string[] | string) {
 		const update: Mongo.Modifier<DominatorDocument> = {}
-		if (!jobNames || jobNames=='*') update.$set = {pausedJobs: ['*']}; // stop all jobs
-		else update.$addToSet = {pausedJobs: typeof jobNames=='string' ? jobNames : {$each: jobNames}};
+		if (!jobNames || jobNames == '*') {
+			update.$set = {pausedJobs: ['*']}; // stop all jobs
+		} else {
+			update.$addToSet = {pausedJobs: typeof jobNames=='string' ? jobNames : {$each: jobNames}};
+		}
 
 		dominatorCollection.upsert({_id: dominatorId}, update);
 		log('Jobs', 'stopJobs', jobNames, update);
@@ -270,10 +309,19 @@ export namespace Jobs {
 			log('Jobs', 'startup', this.serverId, JSON.stringify(this.lastPing), 'isOld='+lastPingIsOld);
 
 			// need !this.lastPing.serverId on following line in case Jobs.start() or Jobs.stop() updates pausedJobs before
-			if (!this.lastPing || !this.lastPing.serverId) this._takeControl('no ping')					// fresh installation, no one is in control yet.
-			else if (this.lastPing.serverId == this.serverId) this._takeControl('restarted')			// we were in control but have restarted - resume control
-			else if (lastPingIsOld) this._takeControl('lastPingIsOld '+JSON.stringify(this.lastPing));	// other server lost control - take over
-			else this._observer(this.lastPing);															// another server is recently in control, set a timer to check the ping...
+			if (!this.lastPing || !this.lastPing.serverId) {
+				// fresh installation, no one is in control yet.
+				this._takeControl('no ping');
+			} else if (this.lastPing.serverId == this.serverId) {
+				// we were in control but have restarted - resume control
+				this._takeControl('restarted');
+			} else if (lastPingIsOld) {
+				// other server lost control - take over
+				this._takeControl('lastPingIsOld '+JSON.stringify(this.lastPing));
+			} else {
+				// another server is recently in control, set a timer to check the ping...
+				this._observer(this.lastPing);
+			}
 		}
 
 		private _observer(newPing: DominatorDocument) {
@@ -284,7 +332,7 @@ export namespace Jobs {
 			}
 			const oldPausedJobs = this.lastPing && this.lastPing.pausedJobs || [];
 			this.lastPing = newPing;
-			if ((this.lastPing.pausedJobs||[]).join() != oldPausedJobs.join()) {
+			if ((this.lastPing.pausedJobs || []).join() != oldPausedJobs.join()) {
 				// the list of paused jobs has changed - update the query for the job observer
 				// needs dominator.lastPing.pausedJobs to be up-to-date so do this.lastPing = newPing above
 				queue.restart();
@@ -316,13 +364,17 @@ export namespace Jobs {
 		}
 
 		private _ping() {
-			if (!this._pingInterval) this._pingInterval = Meteor.setInterval(()=>this._ping(), settings.maxWait*0.8);
+			if (!this._pingInterval) {
+				this._pingInterval = Meteor.setInterval(()=>this._ping(), settings.maxWait*0.8);
+			}
 			const newPing = {
 				serverId: this.serverId,
 				pausedJobs: this.lastPing ? (this.lastPing.pausedJobs || []) : (settings.autoStart ? [] : ['*']),
 				date: new Date(),
 			};
-			if (!this.lastPing) this.lastPing = newPing;
+			if (!this.lastPing) {
+				this.lastPing = newPing;
+			}
 			dominatorCollection.upsert({_id: dominatorId}, newPing);
 			log('Jobs', 'ping', newPing.date, 'paused:', newPing.pausedJobs);
 		}
@@ -335,9 +387,12 @@ export namespace Jobs {
 		_handle: Meteor.LiveQueryHandle | typeof PAUSED = null;
 		_timeout: number = null;
 		_executing = false;
+		_awaitAsyncJobs = new Set<string>();
 
 		start() {
-			if (this._handle && this._handle != PAUSED) this.stop(); // this also clears any existing job timeout
+			if (this._handle && this._handle != PAUSED) {
+				this.stop(); // this also clears any existing job timeout
+			}
 			const pausedJobs = (dominator.lastPing||{}).pausedJobs || [];
 			log('Jobs', 'queue.start paused:', pausedJobs);
 
@@ -357,7 +412,9 @@ export namespace Jobs {
 		}
 
 		stop() {
-			if (this._handle && this._handle != PAUSED) this._handle.stop();
+			if (this._handle && this._handle != PAUSED) {
+				this._handle.stop();
+			}
 			this._handle = null;
 			this._observer('stop', null);
 		}
@@ -365,16 +422,19 @@ export namespace Jobs {
 		restart() {
 			// this is called by Jobs.start() and Jobs.stop() when the list of pausedJobs changes
 			// only restart the queue if we're already watching it (maybe jobs were started/paused inside _executeJobs())
-			if (this._handle) this.start();
+			if (this._handle) {
+				this.start();
+			}
 		}
 
 		private _observer(type: string, nextJob: JobDocument) {
 			log('Jobs', 'queue.observer', type, nextJob, nextJob && ((nextJob.due.valueOf() - Date.now())/(60*60*1000)).toFixed(2)+'h');
-			if (this._timeout) Meteor.clearTimeout(this._timeout);
+			if (this._timeout) {
+				Meteor.clearTimeout(this._timeout);
+			}
 
 			// cap timeout limit to 24 hours to avoid Node.js limit https://github.com/wildhart/meteor.jobs/issues/5
-			let msTillNextJob = nextJob && (nextJob.due.valueOf() - Date.now());
-			if (msTillNextJob > MAX_TIMEOUT_MS) msTillNextJob = MAX_TIMEOUT_MS;
+			let msTillNextJob = Math.min(MAX_TIMEOUT_MS, nextJob && (nextJob.due.valueOf() - Date.now()));
 
 			this._timeout = nextJob && !this._executing ? Meteor.setTimeout(()=> {
 				this._timeout = null;
@@ -383,7 +443,10 @@ export namespace Jobs {
 		}
 
 		private _executeJobs() {
-			if (this._executing) return console.warn('already executing!');
+			if (this._executing) {
+				console.warn('already executing!');
+				return;
+			}
 			this._executing = true; // protect against observer/timeout race condition
 			try {
 				log('Jobs', 'executeJobs', 'paused:', dominator.lastPing.pausedJobs);
@@ -403,13 +466,12 @@ export namespace Jobs {
 				do {
 					doneJobs = [];
 					do {
-						// findOne() is actually async but is wrapped in a Fiber, so we don't need to worry about blocking the server
 						// always use the live version of dominator.lastPing.pausedJobs in case jobs are paused/restarted while executing
 						const lastPing = dominatorCollection.findOne({}, {fields: {pausedJobs: 1}});
 						job = collection.findOne({
 							state: "pending",
 							due: {$lte: new Date()},
-							name: {$nin: doneJobs.concat(lastPing.pausedJobs)}, // give other job types a chance...
+							name: {$nin: doneJobs.concat(lastPing.pausedJobs, Array.from(queue._awaitAsyncJobs))}, // give other job types a chance...
 							_id: {$ne: lastJobId}, // protect against stale reads of the job we just executed
 						}, {sort: {due: 1, priority: -1}});
 						if (job) {
@@ -417,8 +479,8 @@ export namespace Jobs {
 							executeJob(job);
 							doneJobs.push(job.name); // don't do this job type again until we've tried other jobs.
 						}
-					} while (dominator.lastPing.pausedJobs.indexOf('*')==-1 && job);
-				} while (dominator.lastPing.pausedJobs.indexOf('*')==-1 && doneJobs.length);
+					} while (dominator.lastPing.pausedJobs.indexOf('*') == -1 && job);
+				} while (dominator.lastPing.pausedJobs.indexOf('*') == -1 && doneJobs.length);
 			} catch(e) {
 				console.warn('Jobs', 'executeJobs ERROR');
 				console.warn(e);
@@ -429,8 +491,8 @@ export namespace Jobs {
 	};
 
 	function executeJob(job: JobDocument) {
-		log('Jobs', '  '+job.name);
-		if (typeof jobs[job.name]=='undefined') {
+		log('Jobs', '  ' + job.name);
+		if (typeof jobs[job.name] == 'undefined') {
 			console.warn('Jobs', 'job does not exist:', job.name);
 			setJobState(job._id, 'failure');
 			return;
@@ -477,13 +539,17 @@ export namespace Jobs {
 			setJobState(job._id, 'executing');
 			const res = jobs[job.name].apply(self, job.arguments);
 			if (res?.then) {
-				isAsync = true;
+				isAsync = true
+				if (job.awaitAsync) {
+					queue._awaitAsyncJobs.add(job.name);
+				}
 				res.then(() => {
-					log('Jobs', '    Done async job', job.name, 'result='+action);
+					log('Jobs', '    Done async job', job.name, 'result=' + action);
+					queue._awaitAsyncJobs.delete(job.name);
 					completed();
 				});
 			} else {
-				log('Jobs', '    Done job', job.name, 'result='+action);
+				log('Jobs', '    Done job', job.name, 'result=' + action);
 			}
 		} catch(e) {
 			console.warn('Jobs', 'Error in job', job);
@@ -510,26 +576,27 @@ export namespace Jobs {
 		}));
 
 		let currentDate = config.date || new Date();
-		let newNumber, fn;
+		let newNumber: number;
+		let fn: string;
 
-		Object.keys(config).forEach(function(key1) {
-			if (["in","on"].indexOf(key1) > -1) {
-				Object.keys(config[key1]).forEach(function(key2) {
+		Object.keys(config).forEach(key1 => {
+			if (["in", "on"].indexOf(key1) > -1) {
+				Object.keys(config[key1]).forEach(key2 => {
 					try {
 						newNumber = Number(config[key1][key2]);
 						if (isNaN(newNumber)) {
-							console.warn('Jobs', "invalid type was input: " + key1 + "." + key2, newNumber)
+							console.warn('Jobs', `invalid type was input: {key1}.{key2}`, newNumber)
 						} else {
 							// convert month(s) => months (etc), and day(s) => date and year(s) => fullYear
-							fn = (key2+"s").replace('ss', 's').replace('days','date').replace('years','fullYear').replace('months','month');
+							fn = (key2 + "s").replace('ss', 's').replace('days','date').replace('years','fullYear').replace('months','month');
 							// convert months => Months
 							fn = fn.charAt(0).toUpperCase() + fn.slice(1);
 							// if key1=='in' currentDate.setMonth(newNumber + currentDate.getMonth())
 							// if key1=='on' currentDate.setMonth(newNumber)
-							currentDate['set'+fn](newNumber + (key1=='in' ? currentDate['get'+fn]() : 0));
+							currentDate['set' + fn](newNumber + (key1 == 'in' ? currentDate['get' + fn]() : 0));
 						}
 					} catch (e) {
-						console.warn('Jobs', "invalid argument was ignored: " + key1 + "." + key2, newNumber, fn);
+						console.warn('Jobs', `invalid argument was ignored: {key1}.{key2}`, newNumber, fn);
 						console.log(e);
 					}
 				});

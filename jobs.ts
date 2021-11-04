@@ -1,10 +1,153 @@
 
+const settings: Jobs.Config = {
+	startupDelay: 1 * 1000, // default 1 second
+	maxWait: 5 * 60 * 1000, // specify how long the server could be inactive before another server takes on the master role  (default=5 min)
+	log: console.log,
+	autoStart: true,
+};
+
+function log(...args: any) {
+	typeof settings.log == 'function' && settings.log(...args);
+}
+
+/********************************* Dominator *********************/
+
+namespace Dominator {
+
+	interface Document {
+		_id?: string,
+		serverId?: string,
+		pausedJobs: string[],
+		date?: Date,
+	}
+
+	// we don't need an index on job_dominator_3 because now it only contains one shared document.
+	export const collection = new Mongo.Collection<Document>("jobs_dominator_3");
+	export let lastPing: Readonly<Document> = null;
+	const DOMINATOR_ID = "dominatorId";
+	let _serverId: string = null;
+	let _pingInterval: number =  null;
+	let _takeControlTimeout: number = null;
+
+	Meteor.startup(() => {
+		log('Jobs', `Meteor.startup, startupDelay: ${settings.startupDelay / 1000}s...`);
+		collection.remove({_id: {$ne: DOMINATOR_ID}});
+		Meteor.setTimeout(() => init(), settings.startupDelay);
+	})
+
+	export function init() {
+		_serverId = (typeof settings.setServerId == 'string' && settings.setServerId)
+			|| (typeof settings.setServerId == 'function' && settings.setServerId())
+			|| Random.id();
+
+		collection.find({_id: DOMINATOR_ID}).observe({
+			changed: (newPing) => _observer(newPing),
+		});
+
+		lastPing = collection.findOne();
+		const lastPingIsOld = lastPing && lastPing.date && lastPing.date.valueOf() < Date.now() - settings.maxWait;
+		log('Jobs', 'startup', _serverId, JSON.stringify(lastPing), 'isOld='+lastPingIsOld);
+
+		// need !lastPing.serverId on following line in case Jobs.start() or Jobs.stop() updates pausedJobs before
+		if (!lastPing || !lastPing.serverId) {
+			// fresh installation, no one is in control yet.
+			_takeControl('no ping');
+		} else if (lastPing.serverId == _serverId) {
+			// we were in control but have restarted - resume control
+			_takeControl('restarted');
+		} else if (lastPingIsOld) {
+			// other server lost control - take over
+			_takeControl('lastPingIsOld ' + JSON.stringify(lastPing));
+		} else {
+			// another server is recently in control, set a timer to check the ping...
+			_observer(lastPing);
+		}
+	}
+
+	export function start(jobNames: string[] | string) {
+		const update: Mongo.Modifier<Document> = {}
+		if (!jobNames || jobNames == '*') {
+			// clear the pausedJobs list, start all jobs
+			update.$set = {pausedJobs: []};
+		} else {
+			update.$pullAll = {pausedJobs: typeof jobNames == 'string' ? [jobNames] : jobNames};
+		}
+
+		collection.upsert({_id: DOMINATOR_ID}, update);
+		log('Jobs', 'startJobs', jobNames, update);
+	}
+
+	export function stop(jobNames: string[] | string) {
+		const update: Mongo.Modifier<Document> = {}
+		if (!jobNames || jobNames == '*') {
+			update.$set = {pausedJobs: ['*']}; // stop all jobs
+		} else {
+			update.$addToSet = {pausedJobs: typeof jobNames == 'string' ? jobNames : {$each: jobNames}};
+		}
+
+		collection.upsert({_id: DOMINATOR_ID}, update);
+		log('Jobs', 'stopJobs', jobNames, update);
+	}
+
+	function _observer(newPing: Document) {
+		log('Jobs', 'dominator.observer', newPing);
+		if (lastPing && lastPing.serverId == _serverId && newPing.serverId != _serverId) {
+			// we were in control but another server has taken control
+			_relinquishControl();
+		}
+		const oldPausedJobs = lastPing && lastPing.pausedJobs || [];
+		lastPing = newPing;
+		if ((lastPing.pausedJobs || []).join() != oldPausedJobs.join()) {
+			// the list of paused jobs has changed - update the query for the job observer
+			// needs dominator.lastPing.pausedJobs to be up-to-date so do lastPing = newPing above
+			Queue.restart();
+		}
+		if (_takeControlTimeout) {
+			Meteor.clearTimeout(_takeControlTimeout);
+			_takeControlTimeout = null;
+		}
+		if (lastPing.serverId != _serverId) {
+			// we're not in control, set a timer to take control in the future...
+			_takeControlTimeout = Meteor.setTimeout(() => {
+				// if this timeout isn't cleared then the dominator hasn't been updated recently so we should take control.
+				_takeControl('lastPingIsOld ' + JSON.stringify(lastPing));
+			}, settings.maxWait);
+		}
+	}
+
+	function _takeControl(reason: string) {
+		log('Jobs', 'takeControl', reason);
+		_ping();
+		Queue.start();
+	}
+
+	function _relinquishControl() {
+		log('Jobs', 'relinquishControl');
+		Meteor.clearInterval(_pingInterval);
+		_pingInterval = null;
+		Queue.stop();
+	}
+
+	function _ping() {
+		if (!_pingInterval) {
+			_pingInterval = Meteor.setInterval(() =>_ping(), settings.maxWait * 0.8);
+		}
+		const newPing = {
+			serverId: _serverId,
+			pausedJobs: lastPing ? (lastPing.pausedJobs || []) : (settings.autoStart ? [] : ['*']),
+			date: new Date(),
+		};
+		if (!lastPing) {
+			lastPing = newPing;
+		}
+		collection.upsert({_id: DOMINATOR_ID}, newPing);
+		log('Jobs', 'ping', newPing.date, 'paused:', newPing.pausedJobs);
+	}
+}
+
+/********************************* Public API *********************/
+
 export namespace Jobs {
-
-	const dominatorId = "dominatorId";
-
-	// cap timeout limit to 24 hours to avoid Node.js limit https://github.com/wildhart/meteor.jobs/issues/5
-	const MAX_TIMEOUT_MS = 24 *3600 * 1000;
 
 	export interface Config {
 		startupDelay: number,
@@ -55,23 +198,8 @@ export namespace Jobs {
 
 	export const jobs: JobFunctions = {};
 
-	const settings: Config = {
-		startupDelay: 1 * 1000, // default 1 second
-		maxWait: 5 * 60 * 1000, // specify how long the server could be inactive before another server takes on the master role  (default=5 min)
-		log: console.log,
-		autoStart: true,
-	};
-
-	function log(...args: any) {
-		typeof settings.log == 'function' && settings.log(...args);
-	}
-
-	const configItems: Array<keyof JobConfig> = ['in', 'on', 'priority', 'date', 'callback', 'singular', 'unique', 'awaitAsync']
-	function isConfig(input: any) {
-		return !!(input && typeof input == 'object' && configItems.some(i => typeof input[i] != 'undefined'));
-	}
-
 	export const collection = new Mongo.Collection<JobDocument>("jobs_data");
+
 	collection._ensureIndex({name: 1, due: 1, state: 1});
 
 	export function configure(config: Partial<Config>) {
@@ -95,6 +223,10 @@ export namespace Jobs {
 		Object.assign(jobs, newJobs);
 		// log('Jobs', 'Jobs.register', Object.keys(jobs).length, Object.keys(newJobs).join(', '));
 	}
+
+	const configItems: Array<keyof JobConfig> = ['in', 'on', 'priority', 'date', 'callback', 'singular', 'unique', 'awaitAsync']
+
+	const isConfig = (input: any) => !!(input && typeof input == 'object' && configItems.some(i => typeof input[i] != 'undefined'));
 
 	export function run(name: string, ...args: any) {
 		check(name, String);
@@ -154,7 +286,7 @@ export namespace Jobs {
 			return;
 		}
 
-		executeJob(job);
+		Queue.executeJob(job);
 	}
 
 	export function replicate(jobId: string, config: Partial<JobConfig>) {
@@ -248,329 +380,10 @@ export namespace Jobs {
 		return count;
 	}
 
-	export function start(jobNames: string[] | string) {
-		const update: Mongo.Modifier<DominatorDocument> = {}
-		if (!jobNames || jobNames == '*') {
-			// clear the pausedJobs list, start all jobs
-			update.$set = {pausedJobs: []};
-		} else {
-			update.$pullAll = {pausedJobs: typeof jobNames=='string' ? [jobNames] : jobNames};
-		}
+	export const start = Dominator.start;
+	export const stop = Dominator.stop;
 
-		dominatorCollection.upsert({_id: dominatorId}, update);
-		log('Jobs', 'startJobs', jobNames, update);
-	}
-
-	export function stop(jobNames: string[] | string) {
-		const update: Mongo.Modifier<DominatorDocument> = {}
-		if (!jobNames || jobNames == '*') {
-			update.$set = {pausedJobs: ['*']}; // stop all jobs
-		} else {
-			update.$addToSet = {pausedJobs: typeof jobNames=='string' ? jobNames : {$each: jobNames}};
-		}
-
-		dominatorCollection.upsert({_id: dominatorId}, update);
-		log('Jobs', 'stopJobs', jobNames, update);
-	}
-
-	/********************************* Controller *********************/
-
-	interface DominatorDocument {
-		_id?: string,
-		serverId?: string,
-		pausedJobs: string[],
-		date?: Date,
-	}
-
-	const dominatorCollection = new Mongo.Collection<DominatorDocument>("jobs_dominator_3");
-	// we don't need an index on job_dominator_3 because now it only contains one shared document.
-
-	Meteor.startup(function() {
-		log('Jobs', 'Meteor.startup, startupDelay:', (settings.startupDelay/1000)+'s...');
-		dominatorCollection.remove({_id: {$ne: dominatorId}});
-		Meteor.setTimeout(() => dominator.start(), settings.startupDelay);
-	})
-
-	const dominator = new class {
-
-		lastPing: DominatorDocument = null;
-		serverId: string = null;
-		_pingInterval: number =  null;
-		_takeControlTimeout: number = null;
-
-		start() {
-			this.serverId = (typeof settings.setServerId == 'string' && settings.setServerId)
-				|| (typeof settings.setServerId == 'function' && settings.setServerId())
-				|| Random.id();
-
-			dominatorCollection.find({_id: dominatorId}).observe({
-				changed: (newPing) => this._observer(newPing),
-			});
-
-			this.lastPing = dominatorCollection.findOne();
-			const lastPingIsOld = this.lastPing && this.lastPing.date && this.lastPing.date.valueOf() < Date.now() - settings.maxWait;
-			log('Jobs', 'startup', this.serverId, JSON.stringify(this.lastPing), 'isOld='+lastPingIsOld);
-
-			// need !this.lastPing.serverId on following line in case Jobs.start() or Jobs.stop() updates pausedJobs before
-			if (!this.lastPing || !this.lastPing.serverId) {
-				// fresh installation, no one is in control yet.
-				this._takeControl('no ping');
-			} else if (this.lastPing.serverId == this.serverId) {
-				// we were in control but have restarted - resume control
-				this._takeControl('restarted');
-			} else if (lastPingIsOld) {
-				// other server lost control - take over
-				this._takeControl('lastPingIsOld '+JSON.stringify(this.lastPing));
-			} else {
-				// another server is recently in control, set a timer to check the ping...
-				this._observer(this.lastPing);
-			}
-		}
-
-		private _observer(newPing: DominatorDocument) {
-			log('Jobs', 'dominator.observer', newPing);
-			if (this.lastPing && this.lastPing.serverId==this.serverId && newPing.serverId!=this.serverId) {
-				// we were in control but another server has taken control
-				this._relinquishControl();
-			}
-			const oldPausedJobs = this.lastPing && this.lastPing.pausedJobs || [];
-			this.lastPing = newPing;
-			if ((this.lastPing.pausedJobs || []).join() != oldPausedJobs.join()) {
-				// the list of paused jobs has changed - update the query for the job observer
-				// needs dominator.lastPing.pausedJobs to be up-to-date so do this.lastPing = newPing above
-				queue.restart();
-			}
-			if (this._takeControlTimeout) {
-				Meteor.clearTimeout(this._takeControlTimeout);
-				this._takeControlTimeout = null;
-			}
-			if (this.lastPing.serverId != this.serverId) {
-				// we're not in control, set a timer to take control in the future...
-				this._takeControlTimeout = Meteor.setTimeout(() => {
-					// if this timeout isn't cleared then the dominator hasn't been updated recently so we should take control.
-					this._takeControl('lastPingIsOld '+JSON.stringify(this.lastPing));
-				}, settings.maxWait);
-			}
-		}
-
-		private _takeControl(reason: string) {
-			log('Jobs', 'takeControl', reason);
-			this._ping();
-			queue.start();
-		}
-
-		private _relinquishControl() {
-			log('Jobs', 'relinquishControl');
-			Meteor.clearInterval(this._pingInterval);
-			this._pingInterval = null;
-			queue.stop();
-		}
-
-		private _ping() {
-			if (!this._pingInterval) {
-				this._pingInterval = Meteor.setInterval(()=>this._ping(), settings.maxWait*0.8);
-			}
-			const newPing = {
-				serverId: this.serverId,
-				pausedJobs: this.lastPing ? (this.lastPing.pausedJobs || []) : (settings.autoStart ? [] : ['*']),
-				date: new Date(),
-			};
-			if (!this.lastPing) {
-				this.lastPing = newPing;
-			}
-			dominatorCollection.upsert({_id: dominatorId}, newPing);
-			log('Jobs', 'ping', newPing.date, 'paused:', newPing.pausedJobs);
-		}
-	}
-
-	const PAUSED = 'paused';
-
-	const queue = new class {
-
-		_handle: Meteor.LiveQueryHandle | typeof PAUSED = null;
-		_timeout: number = null;
-		_executing = false;
-		_awaitAsyncJobs = new Set<string>();
-
-		start() {
-			if (this._handle && this._handle != PAUSED) {
-				this.stop(); // this also clears any existing job timeout
-			}
-			const pausedJobs = (dominator.lastPing||{}).pausedJobs || [];
-			log('Jobs', 'queue.start paused:', pausedJobs);
-
-			// don't bother creating an observer if all jobs are paused
-			this._handle = pausedJobs[0]=='*' ? PAUSED : collection.find({
-				state: "pending",
-				name: {$nin: pausedJobs},
-			}, {
-				limit: 1,
-				sort: {due: 1},
-				fields: {name: 1, due: 1},
-			}).observe({
-				changed: (job) => this._observer('changed', job),
-				added: (job) => this._observer('added', job),
-			});
-			// this will automatically call the observer which will set the timer for the next job.
-		}
-
-		stop() {
-			if (this._handle && this._handle != PAUSED) {
-				this._handle.stop();
-			}
-			this._handle = null;
-			this._observer('stop', null);
-		}
-
-		restart() {
-			// this is called by Jobs.start() and Jobs.stop() when the list of pausedJobs changes
-			// only restart the queue if we're already watching it (maybe jobs were started/paused inside _executeJobs())
-			if (this._handle) {
-				this.start();
-			}
-		}
-
-		private _observer(type: string, nextJob: JobDocument) {
-			log('Jobs', 'queue.observer', type, nextJob, nextJob && ((nextJob.due.valueOf() - Date.now())/(60*60*1000)).toFixed(2)+'h');
-			if (this._timeout) {
-				Meteor.clearTimeout(this._timeout);
-			}
-
-			// cap timeout limit to 24 hours to avoid Node.js limit https://github.com/wildhart/meteor.jobs/issues/5
-			let msTillNextJob = Math.min(MAX_TIMEOUT_MS, nextJob && (nextJob.due.valueOf() - Date.now()));
-
-			this._timeout = nextJob && !this._executing ? Meteor.setTimeout(()=> {
-				this._timeout = null;
-				this._executeJobs()
-			}, msTillNextJob) : null;
-		}
-
-		private _executeJobs() {
-			if (this._executing) {
-				console.warn('already executing!');
-				return;
-			}
-			this._executing = true; // protect against observer/timeout race condition
-			try {
-				log('Jobs', 'executeJobs', 'paused:', dominator.lastPing.pausedJobs);
-
-				// ignore job queue changes while executing jobs. Will restart observer with .start() at end
-				this.stop();
-
-				// need to prevent 1000s of the same job type from hogging the job queue and delaying other jobs
-				// after running a job, add its job.name to doneJobs, then find the next job excluding those in doneJobs
-				// if no other jobs can be found then clear doneJobs to allow the same job to run again.
-				let job: JobDocument;
-				let doneJobs: string[];
-
-				// protect against stale read
-				let lastJobId = 'not null';
-
-				do {
-					doneJobs = [];
-					do {
-						// always use the live version of dominator.lastPing.pausedJobs in case jobs are paused/restarted while executing
-						const lastPing = dominatorCollection.findOne({}, {fields: {pausedJobs: 1}});
-						job = collection.findOne({
-							state: "pending",
-							due: {$lte: new Date()},
-							name: {$nin: doneJobs.concat(lastPing.pausedJobs, Array.from(queue._awaitAsyncJobs))}, // give other job types a chance...
-							_id: {$ne: lastJobId}, // protect against stale reads of the job we just executed
-						}, {sort: {due: 1, priority: -1}});
-						if (job) {
-							lastJobId = job._id;
-							executeJob(job);
-							doneJobs.push(job.name); // don't do this job type again until we've tried other jobs.
-						}
-					} while (dominator.lastPing.pausedJobs.indexOf('*') == -1 && job);
-				} while (dominator.lastPing.pausedJobs.indexOf('*') == -1 && doneJobs.length);
-			} catch(e) {
-				console.warn('Jobs', 'executeJobs ERROR');
-				console.warn(e);
-			}
-			this._executing = false;
-			this.start();
-		}
-	};
-
-	function executeJob(job: JobDocument) {
-		log('Jobs', '  ' + job.name);
-		if (typeof jobs[job.name] == 'undefined') {
-			console.warn('Jobs', 'job does not exist:', job.name);
-			setJobState(job._id, 'failure');
-			return;
-		}
-		let action: JobStatus | 'reschedule' | 'remove' = null;
-		const self: JobThisType = {
-			document: job,
-			replicate: function(config) {
-				return replicate(job._id, config);
-			},
-			reschedule: function(config) {
-				action = 'reschedule';
-				reschedule(job._id, config);
-			},
-			remove: function() {
-				action = 'remove';
-				return remove(job._id);
-			},
-			success: function() {
-				action = 'success';
-				return setJobState(job._id, action);
-			},
-			failure: function() {
-				action = 'failure';
-				return setJobState(job._id, action);
-			},
-		};
-
-		let isAsync = false;
-		function completed() {
-			if (!action) {
-				if (settings.defaultCompletion == 'success') {
-					setJobState(job._id, 'success');
-				} else if (settings.defaultCompletion == 'remove') {
-					remove(job._id);
-				} else {
-					console.warn('Jobs', "Job was not resolved with success, failure, reschedule or remove. Consider using the 'defaultCompletion' option.", job);
-					setJobState(job._id, 'failure');
-				}
-			}
-		}
-
-		try {
-			setJobState(job._id, 'executing');
-			const res = jobs[job.name].apply(self, job.arguments);
-			if (res?.then) {
-				isAsync = true
-				if (job.awaitAsync) {
-					queue._awaitAsyncJobs.add(job.name);
-				}
-				res.then(() => {
-					log('Jobs', '    Done async job', job.name, 'result=' + action);
-					queue._awaitAsyncJobs.delete(job.name);
-					completed();
-				});
-			} else {
-				log('Jobs', '    Done job', job.name, 'result=' + action);
-			}
-		} catch(e) {
-			console.warn('Jobs', 'Error in job', job);
-			console.warn(e);
-			if (action != 'reschedule') self.failure();
-		}
-
-		if (!isAsync) {
-			completed();
-		}
-	}
-
-	function setJobState(jobId: string, state: JobStatus) {
-		const count = Jobs.collection.update({_id: jobId}, {$set: {state: state}});
-		log('Jobs', 'setJobState', jobId, state, count);
-	}
-
-	function getDateFromConfig(config: Partial<JobConfig>) {
+	function getDateFromConfig(config: Partial<Jobs.JobConfig>) {
 		// https://github.com/msavin/SteveJobs..meteor.jobs.scheduler.queue.background.tasks/blob/031fdf5051b2f2581a47f64ab5b54ffbb6893cf8/package/server/imports/utilities/helpers/date.js
 		check(config, Match.ObjectIncluding({
 			date: Match.Maybe(Date),
@@ -607,5 +420,214 @@ export namespace Jobs {
 		});
 		return currentDate;
 	}
+}
+
+/********************************* Queue *********************/
+
+namespace Queue {
+
+	const PAUSED = 'paused';
+
+	var _handle: Meteor.LiveQueryHandle | typeof PAUSED = null;
+	var _timeout: number = null;
+	var _executing = false;
+	var _awaitAsyncJobs = new Set<string>();
+
+	export function start() {
+		if (_handle && _handle != PAUSED) {
+			stop(); // this also clears any existing job timeout
+		}
+		const pausedJobs = (Dominator.lastPing || {}).pausedJobs || [];
+		log('Jobs', 'queue.start paused:', pausedJobs);
+
+		// don't bother creating an observer if all jobs are paused
+		_handle = pausedJobs[0]=='*' ? PAUSED : Jobs.collection.find({
+			state: "pending",
+			name: {$nin: pausedJobs},
+		}, {
+			limit: 1,
+			sort: {due: 1},
+			fields: {name: 1, due: 1},
+		}).observe({
+			changed: (job) => _observer('changed', job),
+			added: (job) => _observer('added', job),
+		});
+		// this will automatically call the observer which will set the timer for the next job.
+	}
+
+	export function stop() {
+		if (_handle && _handle != PAUSED) {
+			_handle.stop();
+		}
+		_handle = null;
+		_observer('stop', null);
+	}
+
+	export function restart() {
+		// this is called by Jobs.start() and Jobs.stop() when the list of pausedJobs changes
+		// only restart the queue if we're already watching it (maybe jobs were started/paused inside _executeJobs())
+		if (_handle) {
+			start();
+		}
+	}
+
+	// cap timeout limit to 24 hours to avoid Node.js limit https://github.com/wildhart/meteor.jobs/issues/5
+	const MAX_TIMEOUT_MS = 24 *3600 * 1000;
+
+	function _observer(type: string, nextJob: Jobs.JobDocument) {
+		log('Jobs', 'queue.observer', type, nextJob, nextJob && ((nextJob.due.valueOf() - Date.now())/(60*60*1000)).toFixed(2)+'h');
+		if (_timeout) {
+			Meteor.clearTimeout(_timeout);
+		}
+
+		// cap timeout limit to 24 hours to avoid Node.js limit https://github.com/wildhart/meteor.jobs/issues/5
+		let msTillNextJob = Math.min(MAX_TIMEOUT_MS, nextJob && (nextJob.due.valueOf() - Date.now()));
+
+		_timeout = nextJob && !_executing ? Meteor.setTimeout(()=> {
+			_timeout = null;
+			_executeJobs()
+		}, msTillNextJob) : null;
+	}
+
+	function _executeJobs() {
+		// protect against observer/timeout race condition
+		if (_executing) {
+			console.warn('already executing!');
+			return;
+		}
+		_executing = true; 
+
+		try {
+			log('Jobs', 'executeJobs', 'paused:', Dominator.lastPing.pausedJobs);
+
+			// ignore job queue changes while executing jobs. Will restart observer with .start() at end
+			stop();
+
+			// need to prevent 1000s of the same job type from hogging the job queue and delaying other jobs
+			// after running a job, add its job.name to doneJobs, then find the next job excluding those in doneJobs
+			// if no other jobs can be found then clear doneJobs to allow the same job to run again.
+			let job: Jobs.JobDocument;
+			let doneJobs: string[];
+
+			// protect against stale read
+			let lastJobId = 'not null';
+
+			do {
+				doneJobs = [];
+				do {
+					// always use the live version of dominator.lastPing.pausedJobs in case jobs are paused/restarted while executing
+					const lastPing = Dominator.collection.findOne({}, {fields: {pausedJobs: 1}});
+					job = Jobs.collection.findOne({
+						state: "pending",
+						due: {$lte: new Date()},
+						name: {$nin: doneJobs.concat(lastPing.pausedJobs, Array.from(_awaitAsyncJobs))}, // give other job types a chance...
+						_id: {$ne: lastJobId}, // protect against stale reads of the job we just executed
+					}, {sort: {due: 1, priority: -1}});
+					if (job) {
+						lastJobId = job._id;
+						executeJob(job);
+						doneJobs.push(job.name); // don't do this job type again until we've tried other jobs.
+					}
+				} while (Dominator.lastPing.pausedJobs.indexOf('*') == -1 && job);
+			} while (Dominator.lastPing.pausedJobs.indexOf('*') == -1 && doneJobs.length);
+		} catch(e) {
+			console.warn('Jobs', 'executeJobs ERROR');
+			console.warn(e);
+		}
+
+		_executing = false;
+		start();
+	}
+
+	export function executeJob(job: Jobs.JobDocument) {
+		log('Jobs', '  ' + job.name);
+
+		if (typeof Jobs.jobs[job.name] == 'undefined') {
+			console.warn('Jobs', 'job does not exist:', job.name);
+			setJobState(job._id, 'failure');
+			return;
+		}
+
+		let action: Jobs.JobStatus | 'reschedule' | 'remove' = null;
+
+		const self: Jobs.JobThisType = {
+			document: job,
+			replicate: function(config) {
+				return Jobs.replicate(job._id, config);
+			},
+			reschedule: function(config) {
+				action = 'reschedule';
+				Jobs.reschedule(job._id, config);
+			},
+			remove: function() {
+				action = 'remove';
+				return Jobs.remove(job._id);
+			},
+			success: function() {
+				action = 'success';
+				return setJobState(job._id, action);
+			},
+			failure: function() {
+				action = 'failure';
+				return setJobState(job._id, action);
+			},
+		};
+
+		function completed() {
+			if (!action) {
+				if (settings.defaultCompletion == 'success') {
+					setJobState(job._id, 'success');
+				} else if (settings.defaultCompletion == 'remove') {
+					Jobs.remove(job._id);
+				} else {
+					console.warn('Jobs', "Job was not resolved with success, failure, reschedule or remove. Consider using the 'defaultCompletion' option.", job);
+					setJobState(job._id, 'failure');
+				}
+			}
+		}
+
+		let isAsync = false;
+
+		try {
+			setJobState(job._id, 'executing');
+			const res = Jobs.jobs[job.name].apply(self, job.arguments);
+			if (res?.then) {
+				isAsync = true
+				if (job.awaitAsync) {
+					_awaitAsyncJobs.add(job.name);
+				}
+				res.then(() => {
+					log('Jobs', '    Done async job', job.name, 'result:', action);
+					_awaitAsyncJobs.delete(job.name);
+					completed();
+				}).catch(e => {
+					console.warn('Jobs', '    Error in async job', job);
+					console.warn(e);
+					_awaitAsyncJobs.delete(job.name);
+					if (action != 'reschedule') {
+						self.failure();
+					}
+				});
+			} else {
+				log('Jobs', '    Done job', job.name, 'result:', action);
+			}
+		} catch(e) {
+			console.warn('Jobs', 'Error in job', job);
+			console.warn(e);
+			if (action != 'reschedule') {
+				self.failure();
+			}
+		}
+
+		if (!isAsync) {
+			completed();
+		}
+	}
+
+	function setJobState(jobId: string, state: Jobs.JobStatus) {
+		const count = Jobs.collection.update({_id: jobId}, {$set: {state: state}});
+		log('Jobs', 'setJobState', jobId, state, count);
+	}
 
 };
+

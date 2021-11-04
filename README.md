@@ -417,7 +417,7 @@ If any of these differences make this package unsuitable for you, please let me 
 
 ## Version History
 
-#### 1.0.15 (2021-11-04)
+#### 1.0.16 (2021-11-04)
 - Added `awaitAsync: true` option for [async jobs](#asyncjobs). Fixes [#14](/issues/14).
 
 #### 1.0.13 (2021-08-23)

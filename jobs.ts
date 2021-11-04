@@ -16,8 +16,10 @@ export namespace Jobs {
 	}
 
 	export interface JobConfig {
+		in: any;
+		on: any;
 		priority: number;
-		due: Date;
+		date: Date;
 		state: string;
 		awaitAsync: boolean;
 		unique: boolean;
@@ -64,8 +66,9 @@ export namespace Jobs {
 		typeof settings.log == 'function' && settings.log(...args);
 	}
 
+	const configItems: Array<keyof JobConfig> = ['in', 'on', 'priority', 'date', 'callback', 'singular', 'unique', 'awaitAsync']
 	function isConfig(input: any) {
-		return !!(typeof input=='object' && (input.in || input.on || input.priority || input.date || input.data || input.callback || input.singular || input.unique));
+		return !!(input && typeof input == 'object' && configItems.some(i => typeof input[i] != 'undefined'));
 	}
 
 	export const collection = new Mongo.Collection<JobDocument>("jobs_data");

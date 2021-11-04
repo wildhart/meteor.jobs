@@ -201,7 +201,7 @@ The configuration object supports the following inputs:
 	- The default priority for each job is 0
 	- If you set it to a positive integer, it will run ahead of other jobs.
 	- If you set it to a negative integer, it will only run after all the zero or positive jobs have completed.
-- **`date`** - Function
+- **`date`** - Date
 	- Provide your own date. This stacks with the `in` and `on` operator, and will be applied before they perform their operations.
 * **`unique`** - Boolean
 	- If a job is marked as unique, it will only be scheduled if no other job exists with the same arguments
@@ -417,7 +417,7 @@ If any of these differences make this package unsuitable for you, please let me 
 
 ## Version History
 
-#### 1.0.14 (2021-11-04)
+#### 1.0.15 (2021-11-04)
 - Added `awaitAsync: true` option for [async jobs](#asyncjobs). Fixes [#14](/issues/14).
 
 #### 1.0.13 (2021-08-23)

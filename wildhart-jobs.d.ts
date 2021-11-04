@@ -8,17 +8,22 @@ declare module 'meteor/wildhart:jobs' {
             log: typeof console.log | boolean;
             autoStart: boolean;
             setServerId?: string | Function;
-        }
-
-        interface JobConfig {
-            priority?: number;
-            due?: Date;
-            state: string;
-            callback?: Function;
             defaultCompletion?: 'success' | 'remove';
         }
 
-        export type JobStatus = "pending" | "success" | "failure" | "executing";
+        interface JobConfig {
+            in: any;
+            on: any;
+            priority: number;
+            date: Date;
+            state: string;
+            awaitAsync: boolean;
+            unique: boolean;
+            singular: boolean;
+            callback?: Function;
+        }
+
+        type JobStatus = "pending" | "success" | "failure" | "executing";
 
         interface JobDocument {
             _id: string,
@@ -28,6 +33,7 @@ declare module 'meteor/wildhart:jobs' {
             due: Date,
             priority: number,
             created: Date,
+            awaitAsync?: boolean,
         }
 
         interface JobThisType {
@@ -43,8 +49,8 @@ declare module 'meteor/wildhart:jobs' {
         type JobFunctions = Record<string, JobFunction>;
         type RegisterFn = (jobFunctions: JobFunctions) => void;
 
-        var collection: Mongo.Collection<JobDocument>;
-        var jobs: JobFunctions;
+        let collection: Mongo.Collection<JobDocument>;
+        let jobs: JobFunctions;
 
         function configure(options: Partial<Config>): void;
         function register(jobFunctions: JobFunctions): void;

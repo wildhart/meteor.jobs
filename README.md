@@ -159,9 +159,9 @@ Each job is bound with a set of functions to give you maximum control over how t
  - `this.document` - access the job document
  - `this.success()` - tell the queue the job is completed
  - `this.failure()` - tell the queue the job failed
- - `this.reschedule(config)` - tell the queue to schedule the job for a future date (returns the new jobId)
+ - `this.reschedule(config)` - tell the queue to schedule the job for a future date
  - `this.remove()` - remove the job from the queue
- - `this.replicate(config)` - create a copy of the job with a different due date provided by `config`
+ - `this.replicate(config)` - create a copy of the job with a different due date provided by `config` (returns the new jobId)
 
 Each job must be resolved with success, failure, reschedule, and/or remove.
 

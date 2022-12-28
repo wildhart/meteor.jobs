@@ -112,7 +112,7 @@ Jobs.configure({
     // determine how to set the serverId - see below. (default = random string)
     setServerId: String || Function,
 
-    // determine if/how to log the package outputs (defalt = console.log)
+    // determine if/how to log the package outputs (default = console.log)
     log: Boolean || Function,
 
     // specify if all job queues should start automatically on first launch (default = true)...

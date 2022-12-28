@@ -119,7 +119,7 @@ Jobs.configure({
     //  ... after server relaunch the list of paused queues is restored from the database.
     autoStart: Boolean,
 
-    // whether to mark successfull just as successful, or remove them,
+    // whether to mark successful just as successful, or remove them,
     // otherwise you have to resolve every job with this.success() or this.remove()
     defaultCompletion: 'success' | 'remove',
 })

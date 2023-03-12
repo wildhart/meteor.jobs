@@ -41,6 +41,7 @@
   "exclude": [
     "./.meteor/**",
     "./packages/**",
-    "./package.js"
+    "./package.js",
+    "./test"
   ]
 }

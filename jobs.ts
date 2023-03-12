@@ -74,7 +74,7 @@ namespace Dominator {
 		}
 	}
 
-	export function start(jobNames: string[] | string) {
+	export function start(jobNames?: string[] | string) {
 		const update: Mongo.Modifier<Document> = {}
 		if (!jobNames || jobNames == '*') {
 			// clear the pausedJobs list, start all jobs
@@ -87,7 +87,7 @@ namespace Dominator {
 		log('Jobs', 'startJobs', jobNames, update);
 	}
 
-	export function stop(jobNames: string[] | string) {
+	export function stop(jobNames?: string[] | string) {
 		const update: Mongo.Modifier<Document> = {}
 		if (!jobNames || jobNames == '*') {
 			update.$set = {pausedJobs: ['*']}; // stop all jobs
@@ -339,7 +339,7 @@ export namespace Jobs {
 		return count > 0;
 	}
 
-	export function clear(state: '*' | JobStatus | JobStatus[], jobName: string, ...args: any[]) {
+	export function clear(state?: '*' | JobStatus | JobStatus[], jobName?: string, ...args: any[]) {
 		const query: Mongo.Query<JobDocument> = {
 			state: state === "*" ? {$exists: true}
 				: typeof state === "string" ? state as JobStatus

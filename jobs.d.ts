@@ -10,8 +10,8 @@ declare namespace Dominator {
     export const collection: Mongo.Collection<Document, Document>;
     export let lastPing: Readonly<Document>;
     export function init(): void;
-    export function start(jobNames: string[] | string): void;
-    export function stop(jobNames: string[] | string): void;
+    export function start(jobNames?: string[] | string): void;
+    export function stop(jobNames?: string[] | string): void;
     export {};
 }
 /********************************* Public API *********************/
@@ -66,7 +66,7 @@ export declare namespace Jobs {
     function replicate(jobId: string, config: Partial<JobConfig>): string;
     function reschedule(jobId: string, config: Partial<JobConfig>): void;
     function remove(jobId: string): boolean;
-    function clear(state: '*' | JobStatus | JobStatus[], jobName: string, ...args: any[]): number;
+    function clear(state?: '*' | JobStatus | JobStatus[], jobName?: string, ...args: any[]): number;
     function findOne(jobName: string, ...args: any[]): JobDocument;
     function count(jobName: string, ...args: any[]): number;
     function countPending(jobName: string, ...args: any[]): number;

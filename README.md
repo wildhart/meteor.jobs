@@ -85,8 +85,6 @@ The configuration object supports `date`, `in`, `on`, and `priority`, all of whi
  - [Jobs.replicate](#jobsreplicate)
  - [Jobs.start](#jobsstart)
  - [Jobs.stop](#jobsstop)
- - [Jobs.get](#jobsget)
- - [Jobs.cancel](#jobscancel)
  - [Jobs.clear](#jobsclear)
  - [Jobs.remove](#jobsremove)
  - [Jobs.jobs](#jobsjobs)
@@ -287,28 +285,6 @@ If you need to stop all jobs via mongo use:
 mongo> db.jobs_dominator_3.update({_id:"dominatorId"}, {$set: {pausedJobs: ['*']}});
 ```
 The in-control server should observe the change and stop instantly. Use `{$unset: {pausedJobs: 1}}` or `{$set: {pausedJobs: []}}` to start all the queues again.
-
-### Jobs.get
-
-`Jobs.get` allows you to get a job document by its document id.
-
-```javascript
-var jobDocument = Jobs.get(jobId);
-```
-
-A job document looks like this:
-
-```javascript
-{
-	_id: 'BqjPbF9NGxY4YdnGn',
-	name: 'sendEmail',
-	created: '2018-05-18T09:48:48.355Z',
-	state: 'success',
-	due: '2018-05-18T09:48:48.355Z',
-	priority: 0,
-	arguments: ['jony@apple.com', 'Hello again'],
-}
-```
 
 ### Jobs.clear
 

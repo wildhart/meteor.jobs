@@ -1,4 +1,9 @@
 
+import { check, Match } from 'meteor/check';
+import { Meteor } from 'meteor/meteor';
+import { Mongo } from 'meteor/mongo';
+import { Random } from 'meteor/random';
+
 const settings: Jobs.Config = {
 	startupDelay: 1 * 1000, // default 1 second
 	maxWait: 5 * 60 * 1000, // specify how long the server could be inactive before another server takes on the master role  (default=5 min)
@@ -23,10 +28,14 @@ namespace Dominator {
 
 	// we don't need an index on job_dominator_3 because now it only contains one shared document.
 	export const collection = new Mongo.Collection<Document>("jobs_dominator_3");
+	// @ts-ignore
 	export let lastPing: Readonly<Document> = null;
 	const DOMINATOR_ID = "dominatorId";
+	// @ts-ignore
 	let _serverId: string = null;
+	// @ts-ignore
 	let _pingInterval: number =  null;
+	// @ts-ignore
 	let _takeControlTimeout: number = null;
 
 	Meteor.startup(() => {
@@ -44,6 +53,7 @@ namespace Dominator {
 			changed: (newPing) => _observer(newPing),
 		});
 
+		// @ts-ignore
 		lastPing = collection.findOne();
 		const lastPingIsOld = lastPing && lastPing.date && lastPing.date.valueOf() < Date.now() - settings.maxWait;
 		log('Jobs', 'startup', _serverId, JSON.stringify(lastPing), 'isOld='+lastPingIsOld);
@@ -104,6 +114,7 @@ namespace Dominator {
 		}
 		if (_takeControlTimeout) {
 			Meteor.clearTimeout(_takeControlTimeout);
+			// @ts-ignore
 			_takeControlTimeout = null;
 		}
 		if (lastPing.serverId != _serverId) {
@@ -124,6 +135,7 @@ namespace Dominator {
 	function _relinquishControl() {
 		log('Jobs', 'relinquishControl');
 		Meteor.clearInterval(_pingInterval);
+		// @ts-ignore
 		_pingInterval = null;
 		Queue.stop();
 	}
@@ -298,6 +310,7 @@ export namespace Jobs {
 			return null;
 		}
 
+		// @ts-ignore
 		delete job._id;
 		job.due = date;
 		job.state = 'pending';
@@ -397,8 +410,10 @@ export namespace Jobs {
 
 		Object.keys(config).forEach(key1 => {
 			if (["in", "on"].indexOf(key1) > -1) {
+				// @ts-ignore
 				Object.keys(config[key1]).forEach(key2 => {
 					try {
+						// @ts-ignore
 						newNumber = Number(config[key1][key2]);
 						if (isNaN(newNumber)) {
 							console.warn('Jobs', `invalid type was input: {key1}.{key2}`, newNumber)
@@ -409,6 +424,7 @@ export namespace Jobs {
 							fn = fn.charAt(0).toUpperCase() + fn.slice(1);
 							// if key1=='in' currentDate.setMonth(newNumber + currentDate.getMonth())
 							// if key1=='on' currentDate.setMonth(newNumber)
+							// @ts-ignore
 							currentDate['set' + fn](newNumber + (key1 == 'in' ? currentDate['get' + fn]() : 0));
 						}
 					} catch (e) {
@@ -428,7 +444,9 @@ namespace Queue {
 
 	const PAUSED = 'paused';
 
+	// @ts-ignore
 	var _handle: Meteor.LiveQueryHandle | typeof PAUSED = null;
+	// @ts-ignore
 	var _timeout: number = null;
 	var _executing = false;
 	var _awaitAsyncJobs = new Set<string>();
@@ -459,7 +477,9 @@ namespace Queue {
 		if (_handle && _handle != PAUSED) {
 			_handle.stop();
 		}
+		// @ts-ignore
 		_handle = null;
+		// @ts-ignore
 		_observer('stop', null);
 	}
 
@@ -483,7 +503,9 @@ namespace Queue {
 		// cap timeout limit to 24 hours to avoid Node.js limit https://github.com/wildhart/meteor.jobs/issues/5
 		let msTillNextJob = Math.min(MAX_TIMEOUT_MS, nextJob && (nextJob.due.valueOf() - Date.now()));
 
+		// @ts-ignore
 		_timeout = nextJob && !_executing ? Meteor.setTimeout(()=> {
+			// @ts-ignore
 			_timeout = null;
 			_executeJobs()
 		}, msTillNextJob) : null;
@@ -517,9 +539,11 @@ namespace Queue {
 				do {
 					// always use the live version of dominator.lastPing.pausedJobs in case jobs are paused/restarted while executing
 					const lastPing = Dominator.collection.findOne({}, {fields: {pausedJobs: 1}});
+					// @ts-ignore
 					job = Jobs.collection.findOne({
 						state: "pending",
 						due: {$lte: new Date()},
+						// @ts-ignore
 						name: {$nin: doneJobs.concat(lastPing.pausedJobs, Array.from(_awaitAsyncJobs))}, // give other job types a chance...
 						_id: {$ne: lastJobId}, // protect against stale reads of the job we just executed
 					}, {sort: {due: 1, priority: -1}});
@@ -548,6 +572,7 @@ namespace Queue {
 			return;
 		}
 
+		// @ts-ignore
 		let action: Jobs.JobStatus | 'reschedule' | 'remove' = null;
 
 		const self: Jobs.JobThisType = {
@@ -591,15 +616,18 @@ namespace Queue {
 		try {
 			setJobState(job._id, 'executing');
 			const res = Jobs.jobs[job.name].apply(self, job.arguments);
+			// @ts-ignore
 			if (res?.then) {
 				isAsync = true
 				if (job.awaitAsync) {
 					_awaitAsyncJobs.add(job.name);
 				}
+				// @ts-ignore
 				res.then(() => {
 					log('Jobs', '    Done async job', job.name, 'result:', action);
 					_awaitAsyncJobs.delete(job.name);
 					completed();
+				// @ts-ignore
 				}).catch(e => {
 					console.warn('Jobs', '    Error in async job', job);
 					console.warn(e);

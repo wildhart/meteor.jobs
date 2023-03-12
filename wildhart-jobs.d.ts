@@ -1,6 +1,6 @@
 
 declare module 'meteor/wildhart:jobs' {
-	/// <reference types="meteor" />
+	import { Mongo } from 'meteor/mongo';
 	/********************************* Dominator *********************/
 	declare namespace Dominator {
 	    interface Document {

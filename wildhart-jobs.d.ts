@@ -59,12 +59,12 @@ declare module 'meteor/wildhart:jobs' {
         function replicate(jobId: string, config: Partial<JobConfig>): string | null;
         function reschedule(jobId: string, config: Partial<JobConfig>): void;
         function remove(jobId: string): boolean;
-        function clear(state: '*' | JobStatus | JobStatus[], jobName: string, ...args: any[]): number;
+        function clear(state?: '*' | JobStatus | JobStatus[], jobName?: string, ...args: any[]): number;
         function findOne(jobName: string, ...args: any[]): JobDocument;
         function count(jobName: string, ...args: any[]): number;
         function countPending(jobName: string, ...args: any[]): number;
-        function start(jobNames: string | string[]): void;
-        function stop(jobNames: string | string[]): void;
+        function start(jobNames?: string | string[]): void;
+        function stop(jobNames?: string | string[]): void;
     }
 
 }

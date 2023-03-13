@@ -1,4 +1,3 @@
-
 const settings: Jobs.Config = {
 	startupDelay: 1 * 1000, // default 1 second
 	maxWait: 5 * 60 * 1000, // specify how long the server could be inactive before another server takes on the master role  (default=5 min)
@@ -16,18 +15,18 @@ namespace Dominator {
 
 	interface Document {
 		_id?: string,
-		serverId?: string,
+		serverId?: string | null,
 		pausedJobs: string[],
 		date?: Date,
 	}
 
 	// we don't need an index on job_dominator_3 because now it only contains one shared document.
 	export const collection = new Mongo.Collection<Document>("jobs_dominator_3");
-	export let lastPing: Readonly<Document> = null;
+	export let lastPing: Readonly<Document> | undefined;
 	const DOMINATOR_ID = "dominatorId";
-	let _serverId: string = null;
-	let _pingInterval: number =  null;
-	let _takeControlTimeout: number = null;
+	let _serverId: string | undefined | null = null;
+	let _pingInterval: number | null =  null;
+	let _takeControlTimeout: number | null = null;
 
 	Meteor.startup(() => {
 		log('Jobs', `Meteor.startup, startupDelay: ${settings.startupDelay / 1000}s...`);
@@ -64,7 +63,7 @@ namespace Dominator {
 		}
 	}
 
-	export function start(jobNames: string[] | string) {
+	export function start(jobNames?: string[] | string) {
 		const update: Mongo.Modifier<Document> = {}
 		if (!jobNames || jobNames == '*') {
 			// clear the pausedJobs list, start all jobs
@@ -77,7 +76,7 @@ namespace Dominator {
 		log('Jobs', 'startJobs', jobNames, update);
 	}
 
-	export function stop(jobNames: string[] | string) {
+	export function stop(jobNames?: string[] | string) {
 		const update: Mongo.Modifier<Document> = {}
 		if (!jobNames || jobNames == '*') {
 			update.$set = {pausedJobs: ['*']}; // stop all jobs
@@ -123,8 +122,10 @@ namespace Dominator {
 
 	function _relinquishControl() {
 		log('Jobs', 'relinquishControl');
-		Meteor.clearInterval(_pingInterval);
-		_pingInterval = null;
+		if (_pingInterval) {
+			Meteor.clearInterval(_pingInterval);
+			_pingInterval = null;
+		}
 		Queue.stop();
 	}
 
@@ -132,7 +133,7 @@ namespace Dominator {
 		if (!_pingInterval) {
 			_pingInterval = Meteor.setInterval(() =>_ping(), settings.maxWait * 0.8);
 		}
-		const newPing = {
+		const newPing: Document = {
 			serverId: _serverId,
 			pausedJobs: lastPing ? (lastPing.pausedJobs || []) : (settings.autoStart ? [] : ['*']),
 			date: new Date(),
@@ -298,7 +299,7 @@ export namespace Jobs {
 			return null;
 		}
 
-		delete job._id;
+		delete (job as any)._id;
 		job.due = date;
 		job.state = 'pending';
 		const newJobId = collection.insert(job);
@@ -326,7 +327,7 @@ export namespace Jobs {
 		return count > 0;
 	}
 
-	export function clear(state: '*' | JobStatus | JobStatus[], jobName: string, ...args: any[]) {
+	export function clear(state?: '*' | JobStatus | JobStatus[], jobName?: string, ...args: any[]) {
 		const query: Mongo.Query<JobDocument> = {
 			state: state === "*" ? {$exists: true}
 				: typeof state === "string" ? state as JobStatus
@@ -336,7 +337,7 @@ export namespace Jobs {
 
 		if (typeof jobName === "string") {
 			query.name = jobName;
-		} else if (typeof jobName === "object") {
+		} else if (jobName && typeof jobName === "object") {
 			query.name = {$in: jobName};
 		}
 
@@ -428,8 +429,8 @@ namespace Queue {
 
 	const PAUSED = 'paused';
 
-	var _handle: Meteor.LiveQueryHandle | typeof PAUSED = null;
-	var _timeout: number = null;
+	var _handle: Meteor.LiveQueryHandle | typeof PAUSED | null = null;
+	var _timeout: number | null = null;
 	var _executing = false;
 	var _awaitAsyncJobs = new Set<string>();
 
@@ -460,7 +461,7 @@ namespace Queue {
 			_handle.stop();
 		}
 		_handle = null;
-		_observer('stop', null);
+		_observer('stop');
 	}
 
 	export function restart() {
@@ -474,19 +475,22 @@ namespace Queue {
 	// cap timeout limit to 24 hours to avoid Node.js limit https://github.com/wildhart/meteor.jobs/issues/5
 	const MAX_TIMEOUT_MS = 24 *3600 * 1000;
 
-	function _observer(type: string, nextJob: Jobs.JobDocument) {
+	function _observer(type: string, nextJob?: Jobs.JobDocument) {
 		log('Jobs', 'queue.observer', type, nextJob, nextJob && ((nextJob.due.valueOf() - Date.now())/(60*60*1000)).toFixed(2)+'h');
 		if (_timeout) {
 			Meteor.clearTimeout(_timeout);
+			_timeout = null;
 		}
 
-		// cap timeout limit to 24 hours to avoid Node.js limit https://github.com/wildhart/meteor.jobs/issues/5
-		let msTillNextJob = Math.min(MAX_TIMEOUT_MS, nextJob && (nextJob.due.valueOf() - Date.now()));
+		if (nextJob) {
+			// cap timeout limit to 24 hours to avoid Node.js limit https://github.com/wildhart/meteor.jobs/issues/5
+			let msTillNextJob = Math.min(MAX_TIMEOUT_MS, (nextJob.due.valueOf() - Date.now()) );
 
-		_timeout = nextJob && !_executing ? Meteor.setTimeout(()=> {
-			_timeout = null;
-			_executeJobs()
-		}, msTillNextJob) : null;
+			_timeout = nextJob && !_executing ? Meteor.setTimeout(()=> {
+				_timeout = null;
+				_executeJobs()
+			}, msTillNextJob) : null;
+		}
 	}
 
 	function _executeJobs() {
@@ -495,10 +499,10 @@ namespace Queue {
 			console.warn('already executing!');
 			return;
 		}
-		_executing = true; 
+		_executing = true;
 
 		try {
-			log('Jobs', 'executeJobs', 'paused:', Dominator.lastPing.pausedJobs);
+			log('Jobs', 'executeJobs', 'paused:', Dominator.lastPing?.pausedJobs);
 
 			// ignore job queue changes while executing jobs. Will restart observer with .start() at end
 			stop();
@@ -506,7 +510,7 @@ namespace Queue {
 			// need to prevent 1000s of the same job type from hogging the job queue and delaying other jobs
 			// after running a job, add its job.name to doneJobs, then find the next job excluding those in doneJobs
 			// if no other jobs can be found then clear doneJobs to allow the same job to run again.
-			let job: Jobs.JobDocument;
+			let job: Jobs.JobDocument | undefined;
 			let doneJobs: string[];
 
 			// protect against stale read
@@ -516,7 +520,7 @@ namespace Queue {
 				doneJobs = [];
 				do {
 					// always use the live version of dominator.lastPing.pausedJobs in case jobs are paused/restarted while executing
-					const lastPing = Dominator.collection.findOne({}, {fields: {pausedJobs: 1}});
+					const lastPing = Dominator.collection.findOne({}, {fields: {pausedJobs: 1}})!;
 					job = Jobs.collection.findOne({
 						state: "pending",
 						due: {$lte: new Date()},
@@ -528,8 +532,8 @@ namespace Queue {
 						executeJob(job);
 						doneJobs.push(job.name); // don't do this job type again until we've tried other jobs.
 					}
-				} while (Dominator.lastPing.pausedJobs.indexOf('*') == -1 && job);
-			} while (Dominator.lastPing.pausedJobs.indexOf('*') == -1 && doneJobs.length);
+				} while (Dominator.lastPing!.pausedJobs.indexOf('*') == -1 && job);
+			} while (Dominator.lastPing!.pausedJobs.indexOf('*') == -1 && doneJobs.length);
 		} catch(e) {
 			console.warn('Jobs', 'executeJobs ERROR');
 			console.warn(e);
@@ -548,7 +552,7 @@ namespace Queue {
 			return;
 		}
 
-		let action: Jobs.JobStatus | 'reschedule' | 'remove' = null;
+		let action: Jobs.JobStatus | 'reschedule' | 'remove' | null = null;
 
 		const self: Jobs.JobThisType = {
 			document: job,

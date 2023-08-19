@@ -1,3 +1,8 @@
+import _TypedJob from "./TypedJob";
+
+export const TypedJob2 = _TypedJob;
+export type JobOrId = string | false | null | {_id: string};
+
 const settings: Jobs.Config = {
 	startupDelay: 1 * 1000, // default 1 second
 	maxWait: 5 * 60 * 1000, // specify how long the server could be inactive before another server takes on the master role  (default=5 min)
@@ -186,15 +191,15 @@ export namespace Jobs {
 
 	export interface JobThisType {
 		document: JobDocument;
-		replicate(config: Partial<JobConfig>): string | null;
+		replicate(config: Partial<JobConfig>): string | null | false;
 		reschedule(config: Partial<JobConfig>): void;
 		remove(): boolean;
 		success(): void;
 		failure(): void;
 	}
 
-	export type JobFunction = (this: JobThisType, ...args: any[]) => void;
-	export type JobFunctions = Record<string, JobFunction>;
+    export type JobFunction<TArgs extends any[]> = (this: JobThisType, ...args: TArgs) => void;
+	export type JobFunctions = Record<string, JobFunction<any>>;
 	export type RegisterFn = (jobFunctions: JobFunctions) => void;
 
 	export const jobs: JobFunctions = {};
@@ -274,7 +279,12 @@ export namespace Jobs {
 		return error ? false : jobDoc as JobDocument;
 	}
 
-	export function execute(jobId: string) {
+	export function execute(jobOrId: JobOrId) {
+		if (!jobOrId) {
+			console.warn('Jobs', '    Jobs.execute', 'JOB NOT FOUND', jobOrId);
+			return false;
+		}
+		const jobId = typeof jobOrId == 'string' ? jobOrId : jobOrId._id;
 		check(jobId, String);
 		log('Jobs', 'Jobs.execute', jobId);
 		const job = collection.findOne(jobId);
@@ -290,7 +300,12 @@ export namespace Jobs {
 		Queue.executeJob(job);
 	}
 
-	export function replicate(jobId: string, config: Partial<JobConfig>) {
+	export function replicate(jobOrId: JobOrId, config: Partial<JobConfig>) {
+		if (!jobOrId) {
+			console.warn('Jobs', '    Jobs.replicate', 'JOB NOT FOUND', jobOrId);
+			return false;
+		}
+		const jobId = typeof jobOrId == 'string' ? jobOrId : jobOrId._id;
 		check(jobId, String);
 		const date = getDateFromConfig(config);
 		const job = collection.findOne(jobId);
@@ -307,7 +322,12 @@ export namespace Jobs {
 		return newJobId;
 	}
 
-	export function reschedule(jobId: string, config: Partial<JobConfig>) {
+	export function reschedule(jobOrId: JobOrId, config: Partial<JobConfig>) {
+		if (!jobOrId) {
+			console.warn('Jobs', '    Jobs.reschedule', 'JOB NOT FOUND', jobOrId);
+			return false;
+		}
+		const jobId = typeof jobOrId == 'string' ? jobOrId : jobOrId._id;
 		check(jobId, String);
 		const date = getDateFromConfig(config);
 		var set: Partial<JobDocument> = {due: date, state: 'pending'};
@@ -321,7 +341,11 @@ export namespace Jobs {
 		}
 	}
 
-	export function remove(jobId: string) {
+	export function remove(jobOrId: JobOrId) {
+		if (!jobOrId) {
+			return false;
+		}
+		const jobId = typeof jobOrId == 'string' ? jobOrId : jobOrId._id;
 		var count = collection.remove({_id: jobId});
 		log('Jobs', '    Jobs.remove', jobId, count);
 		return count > 0;
@@ -634,4 +658,3 @@ namespace Queue {
 	}
 
 };
-

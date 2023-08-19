@@ -53,13 +53,50 @@ Jobs.register({
 Finally, schedule a background job like you would call a method:
 
 ```javascript
-Jobs.run("sendReminder", "jony@apple.com", "The future is here!");
+Jobs.run("sendReminder", "jon@example.com", "The future is here!");
 ```
 
 One more thing: the function above will schedule the job to run on the moment that the function was called, however, you can delay it by passing in a special **configuration object** at the end:
 
 ```javascript
-Jobs.run("sendReminder", "jony@apple.com", "The future is here!", {
+Jobs.run("sendReminder", "jon@example.com", "The future is here!", {
+    in: {
+        days: 3,
+    },
+    on: {
+        hour: 9,
+        minute: 42
+    },
+    priority: 9999999999
+});
+```
+The configuration object supports `date`, `in`, `on`, and `priority`, all of which are completely optional, see [Jobs.run](#jobsrun).
+
+## New Strongly Typed API
+
+With version 1.0.17 we introduced a more convenient and strongly typed wrapper Class around our traditional API.
+You can still use the old API, and even upgrade to this new version with no additional work, then you are free to gradually
+update your code to the new API.
+
+Benefits of the new API:
+* All job parameters are strongly typed, so in code which schedules a job you will get IDE warnings if the types are incorrect.
+* No more scheduling jobs by string name, so no risk of typos.
+
+With the new API, the above code would be replaced with:
+```typescript
+import { TypedJob } from "meteor/wildhart:jobs";
+
+export const sendReminderJob = new TypedJob('sendReminders', function(to: string, message: string) {
+	...
+});
+```
+Note that when defining the job, that's only only place you need to refer to the job with a string name.
+
+When scheduling the job, you can reference the class instance directly:
+```typescript
+import { sendReminderJob } from './reminders';
+
+sendReminderJob.withArgs('jon@example.com", The future is here!').run({
     in: {
         days: 3,
     },
@@ -71,9 +108,56 @@ Jobs.run("sendReminder", "jony@apple.com", "The future is here!", {
 });
 ```
 
-The configuration object supports `date`, `in`, `on`, and `priority`, all of which are completely optional, see [Jobs.run](#jobsrun).
+Almost all of the traditional API can be replaced with this new API:
+```typescript
+// as example above
+sendReminderJob.withArgs(...).run(configObject);
+// equivalent to Jobs.clear('*', 'sendReminder', '*', ...args);
+sendReminderJob.clear('*', ...args);
+// NEW API equivalent to Jobs.collection.clear({...query, name: 'sendReminderJob');
+sendReminderJob.clearQuery(query);
 
-## API Documentation
+// same as Jobs.remove(....), but without having to import "Jobs"
+const scheduledJob: JobDocument | false = myJob.withArgs(...).run(...);
+sendReminderJob.remove(scheduledJob);
+// or
+sendReminderJob.remove(scheduledJob._id);
+
+// equivalent to Jobs.start('sendReminders');
+sendReminderJob.start();
+// equivalent to Jobs.stop('sendReminders');
+sendReminderJob.stop();
+// equivalent to Jobs.count('sendReminders', 'jon@example.com');
+sendReminderJob.count('jon@example.com');
+// equivalent to Jobs.findOne('sendReminders', 'jon@example.com');
+sendReminderJob.findOne('jon@example.com');
+// this is new API equivalent to Jobs.update({query, ..name: 'sendReminderJob'}, options);
+sendReminderJob.update(query, options);
+
+// if you need to query the Jobs collection directly, the original name of the job can be obtained:
+sendReminderJob.name; // == 'sendReminders'
+```
+
+Further details of these methods are as per the traditional API below.
+
+One big caveat of the new API is that to run a job you have to import the code from the
+file where the job was defined, which by definition should be exposed on the server side only.
+Therefore, in shared client/server code (e.g. a Meteor Method) if you are used to doing:
+```javascript
+if (Meteor.isServer) {
+	Jobs.run('sendEmail', 'jon@example.com', 'hello', {in: {days: 1}});
+}
+```
+You have to be careful not to import the server-side code into the front-end, by using `import().then()`:
+```javascript
+if (Meteor.isServer) {
+	import('../../server/reminderJobs').then(({sendEmailJob}) => {
+		sendEmailJob.withArgs(...).run(...));
+	});
+}
+```
+
+## Traditional API Documentation
 
 `Jobs.register` and `Jobs.run` are all you need to get started, but that's only the beginning of what the package can do. To explore the rest of the functionality, jump into the documentation:
 
@@ -128,7 +212,7 @@ Jobs.configure({
 
 `Jobs.register` allows you to register a function for a job.
 
-```javascript
+```typescript
 Jobs.register({
 	sendEmail: function (to, content) {
 		var send = Magic.sendEmail(to, content);
@@ -150,7 +234,15 @@ Jobs.register({
 			this.reschedule({in: {minutes: 5}});
 		}
 	}
-})
+});
+
+// or NEW API:
+const sendEmail = new TypedJob('sendEmail', function(to: string, content: EmailDoc) {
+	...
+});
+const sendReminder = new TypedJob('sendReminder', function(to: string, content: ReminderContent) {
+	...
+});
 ```
 
 Each job is bound with a set of functions to give you maximum control over how the job runs:
@@ -170,7 +262,7 @@ See [Repeating Jobs](#repeating-jobs) and [Async Jobs/Promises](#async-jobs)
 `Jobs.run` allows you to schedule a job to run. You call it just like you would call a method, by specifying the job name and its arguments. At the end, you can pass in a special configuration object. Otherwise, it will be scheduled to run as soon as possible.
 
 ```javascript
-var jobDoc = Jobs.run("sendReminder", "jony@apple.com", "The future is here!", {
+var jobDoc = Jobs.run("sendReminder", "jon@example.com", "The future is here!", {
     in: {
         days: 3,
     },
@@ -181,6 +273,9 @@ var jobDoc = Jobs.run("sendReminder", "jony@apple.com", "The future is here!", {
     priority: 9999999999,
     singular: true
 });
+
+// or NEW API:
+sendReminderJob.withArgs("jon@example.com", "The future is here!").run(...);
 ```
 `Jobs.run` returns a `jobDoc`.
 
@@ -215,7 +310,9 @@ The configuration object supports the following inputs:
 `Jobs.execute` allows you to run a job ahead of its due date. It can only work on jobs that have not been resolved.
 
 ```javascript
-Jobs.execute(docId)
+Jobs.execute(doc) // or (doc._id)
+// or NEW API
+sendReminderJob.execute(doc); // or (doc._id)
 ```
 
 ### Jobs.reschedule
@@ -223,12 +320,14 @@ Jobs.execute(docId)
 `Jobs.reschedule` allows you to reschedule a job. It can only work on jobs that have not been resolved.
 
 ```javascript
-Jobs.reschedule(jobId, {
+Jobs.reschedule(job, { // or (job._id)
 	in: {
 		minutes: 5
 	},
 	priority: 9999999
 });
+// or NEW API
+sendReminderJob.execute(job, {...}); // or (job._id, {...});
 ```
 
 The configuration is passed in as the second argument, and it supports the same inputs as `Jobs.run`.
@@ -238,11 +337,13 @@ The configuration is passed in as the second argument, and it supports the same 
 `Jobs.replicate` allows you to replicate a job.
 
 ```javascript
-var jobId = Jobs.replicate(jobId, {
+var jobId = Jobs.replicate(job, { // or (job._id, {...
 	in: {
 		minutes: 5
 	}
 })
+// or NEW API
+sendReminderJob.execute(job, {...}); // or (job._id, {...});
 ```
 
 `Jobs.replicate` returns a `jobId`.
@@ -257,6 +358,8 @@ Jobs.start()
 
 // Start just one queue
 Jobs.start("sendReminder")
+// or NEW API
+sendReminderJob.start();
 
 // Start multiple queues
 Jobs.start(["sendReminder", "sendEmail"])
@@ -274,6 +377,8 @@ Jobs.stop()
 
 // Stop just one queue
 Jobs.stop("sendReminder")
+// or NEW API
+sendReminderJob.stop();
 
 // Stop multiple queues
 Jobs.stop(["sendReminder", "sendEmail"])
@@ -294,7 +399,9 @@ var count = Jobs.clear(state, jobName, ...arguments, callback);
 e.g:
 count = Jobs.clear(); 		// remove all completed jobs (success or failure)
 count = Jobs.clear('*');	// remove all jobs
-count = Jobs.clear('failure', 'sendEmail', 'jony@apple.com', function(err, count) {console.log(err, count)});
+count = Jobs.clear('failure', 'sendEmail', 'jon@example.com', function(err, count) {console.log(err, count)});
+// or NEW API
+count = sendEmailJob.clear('failure', 'jon@example.com', ...);
 ```
 Parameters:
 * `state` for selecting a job state (either `pending`, `success`, `failure`, or `*` to select all of them), or omit to all except `pending` jobs.
@@ -307,7 +414,9 @@ Parameters:
 `Jobs.remove` allows you to remove a job from the collection.
 
 ```javascript
-var success = Jobs.remove(docId);
+var success = Jobs.remove(doc); // or (doc._id)
+// or NEW API
+sendEmailJob.remove(doc); // or (doc._id)
 ```
 
 ### Jobs.jobs
@@ -392,6 +501,9 @@ If any of these differences make this package unsuitable for you, please let me 
 ------
 
 ## Version History
+
+#### 1.0.17 (2023-08-19)
+- Added new [strongly-typed API](#new-strongly-typed-api).
 
 #### 1.0.16 (2021-11-04)
 - Added `awaitAsync: true` option for [async jobs](#asyncjobs). Fixes [#14](/issues/14).

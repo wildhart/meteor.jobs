@@ -1,6 +1,6 @@
 import _TypedJob from "./TypedJob";
 
-export const TypedJob2 = _TypedJob;
+export const TypedJob = _TypedJob;
 export type JobOrId = string | false | null | {_id: string};
 
 const settings: Jobs.Config = {

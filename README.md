@@ -74,9 +74,11 @@ The configuration object supports `date`, `in`, `on`, and `priority`, all of whi
 
 ## New Strongly Typed API
 
-With version 1.0.17 we introduced a more convenient and strongly typed wrapper Class around our traditional API.
+With version 1.0.18 we introduced a more convenient and strongly typed wrapper Class around our traditional API.
 You can still use the old API, and even upgrade to this new version with no additional work, then you are free to gradually
 update your code to the new API.
+
+** Don't forget to copy our new `wildhart-jobs.d.ts` into your project's `@types` folder.
 
 Benefits of the new API:
 * All job parameters are strongly typed, so in code which schedules a job you will get IDE warnings if the types are incorrect.
@@ -502,7 +504,7 @@ If any of these differences make this package unsuitable for you, please let me 
 
 ## Version History
 
-#### 1.0.17 (2023-08-19)
+#### 1.0.18 (2023-08-19)
 - Added new [strongly-typed API](#new-strongly-typed-api).
 
 #### 1.0.16 (2021-11-04)

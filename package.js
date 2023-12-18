@@ -1,6 +1,6 @@
 Package.describe({
 	name: 'wildhart:jobs',
-	version: '1.0.17',
+	version: '1.0.18',
 	summary: 'Schedule jobs to run at a later time, including multi-server, super efficient',
 	git: 'https://github.com/wildhart/meteor.jobs',
 	documentation: 'README.md'

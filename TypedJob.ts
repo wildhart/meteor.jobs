@@ -7,34 +7,34 @@ export default class TypedJob<TArgs extends any[]> {
 
 	public withArgs(...args: TArgs) {
 		return {
-			run: (config?: Partial<Jobs.JobConfig>) => Jobs.run(this.name, ...args, config),
+			run: (config?: Partial<Jobs.JobConfig>) => Jobs.runAsync(this.name, ...args, config),
 		}
 	}
 
-	public clear = (state: '*' | Jobs.JobStatus | Jobs.JobStatus[], ...args: PartialArray<TArgs>) => Jobs.clear(state, this.name, ...args);
+	public clearAsync = (state: '*' | Jobs.JobStatus | Jobs.JobStatus[], ...args: PartialArray<TArgs>) => Jobs.clearAsync(state, this.name, ...args);
 
-	public clearQuery = (query: Mongo.Selector<Jobs.JobDocument>) => Jobs.collection.remove({...query, name: this.name});
+	public clearQueryAsync = (query: Mongo.Selector<Jobs.JobDocument>) => Jobs.collection.removeAsync({...query, name: this.name});
 
-	public remove = (jobOrId: JobOrId) => Jobs.remove(jobOrId);
+	public removeAsync = (jobOrId: JobOrId) => Jobs.removeAsync(jobOrId);
 
-	public execute = (jobOrId: JobOrId) => Jobs.execute(jobOrId);
+	public executeAsync = (jobOrId: JobOrId) => Jobs.executeAsync(jobOrId);
 
-	public reschedule = (jobOrId: JobOrId, config: Partial<Jobs.JobConfig>) => Jobs.reschedule(jobOrId, config);
+	public rescheduleAsync = (jobOrId: JobOrId, config: Partial<Jobs.JobConfig>) => Jobs.rescheduleAsync(jobOrId, config);
 
-	public replicate = (jobOrId: JobOrId, config: Partial<Jobs.JobConfig>) => Jobs.replicate(jobOrId, config);
+	public replicateAsync = (jobOrId: JobOrId, config: Partial<Jobs.JobConfig>) => Jobs.replicateAsync(jobOrId, config);
 
-	public start = () => Jobs.start(this.name);
+	public startAsync = () => Jobs.startAsync(this.name);
 
-	public stop = () => Jobs.stop(this.name);
+	public stopAsync = () => Jobs.stopAsync(this.name);
 
-	public count = (...args: PartialArray<TArgs>) => Jobs.count(this.name, ...args);
+	public countAsync = (...args: PartialArray<TArgs>) => Jobs.countAsync(this.name, ...args);
 
-	public update: Mongo.Collection<Jobs.JobDocument>['update'] = (selector, options) => {
+	public updateAsync: Mongo.Collection<Jobs.JobDocument>['updateAsync'] = (selector, options) => {
 		const mySelector = typeof selector == 'string' ? selector : {...selector, name: this.name};
-		return Jobs.collection.update(mySelector, options);
+		return Jobs.collection.updateAsync(mySelector, options);
 	}
 
-	public findOne = (...args: PartialArray<TArgs>) => Jobs.findOne(this.name, ...args);
+	public findOneAsync = (...args: PartialArray<TArgs>) => Jobs.findOneAsync(this.name, ...args);
 }
 
 // create an array type which doesn't require all elements of the original type

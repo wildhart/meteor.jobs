@@ -19,9 +19,16 @@ The main difference in this package compared to `msavin:jobs` is that this packa
 
 Unfortunately I found the job queue system in `msavin:jobs` too fundamentally built-in to modify and create a PR, so it was easier to write my own package.
 
+## Meteor 2.8 / 3.0 Async Compatibility
+
+**BREAKING CHANGE:** This version is only compatible with Async Mongo methods and therefore requires Meteor 2.8+.  The old synchronous Mongo methods were deprecated since Meteor 2.8 and are removed in Meteor 3.0
+
+* To upgrade from earlier versions of this package, replace all calls to our old `...method()` sync methods with the new `await ...methodAsync()` async methods.
+* To use our legacy synchronous version, install with `meteor add wildhart:jobs@1.0.18` (you can copy typescript definition from this [tagged commit](https://github.com/wildhart/meteor.jobs/tree/v1.0.18))
+
 ## Quick Start
 
-First, install the package, and import if necessary:
+First, install the package, and import:
 
 ```bash
 meteor add wildhart:jobs
@@ -35,16 +42,16 @@ Then, write your background jobs like you would write your methods:
 
 ```javascript
 Jobs.register({
-    "sendReminder": function (to, message) {
+    "sendReminder": async function (to, message) {
         var call = HTTP.put("http://www.magic.com/sendEmail", {
             to: to,
             message: message
         });
 
         if (call.statusCode === 200) {
-            this.success(call.result);
+            await this.successAsync(call.result);
         } else {
-            this.reschedule({in: {minutes: 5}});
+            await this.rescheduleAsync({in: {minutes: 5}});
         }
     }
 });
@@ -53,13 +60,13 @@ Jobs.register({
 Finally, schedule a background job like you would call a method:
 
 ```javascript
-Jobs.run("sendReminder", "jon@example.com", "The future is here!");
+await Jobs.runAsync("sendReminder", "jon@example.com", "The future is here!");
 ```
 
-One more thing: the function above will schedule the job to run on the moment that the function was called, however, you can delay it by passing in a special **configuration object** at the end:
+The function above will schedule the job to run immediately, however, you can delay it by passing in a special **configuration object** at the end:
 
 ```javascript
-Jobs.run("sendReminder", "jon@example.com", "The future is here!", {
+await Jobs.runAsync("sendReminder", "jon@example.com", "The future is here!", {
     in: {
         days: 3,
     },
@@ -67,10 +74,9 @@ Jobs.run("sendReminder", "jon@example.com", "The future is here!", {
         hour: 9,
         minute: 42
     },
-    priority: 9999999999
 });
 ```
-The configuration object supports `date`, `in`, `on`, and `priority`, all of which are completely optional, see [Jobs.run](#jobsrun).
+The configuration object supports `date`, `in`, `on`, and `priority`, all of which are completely optional, see [Jobs.runAsync](#jobsrun).
 
 ## New Strongly Typed API
 
@@ -88,7 +94,7 @@ With the new API, the above code would be replaced with:
 ```typescript
 import { TypedJob } from "meteor/wildhart:jobs";
 
-export const sendReminderJob = new TypedJob('sendReminders', function(to: string, message: string) {
+export const sendReminderJob = new TypedJob('sendReminders', async function(to: string, message: string) {
 	...
 });
 ```
@@ -98,7 +104,7 @@ When scheduling the job, you can reference the class instance directly:
 ```typescript
 import { sendReminderJob } from './reminders';
 
-sendReminderJob.withArgs('jon@example.com", The future is here!').run({
+await sendReminderJob.withArgs('jon@example.com", The future is here!').runAsync({
     in: {
         days: 3,
     },
@@ -106,35 +112,34 @@ sendReminderJob.withArgs('jon@example.com", The future is here!').run({
         hour: 9,
         minute: 42
     },
-    priority: 9999999999
 });
 ```
 
 Almost all of the traditional API can be replaced with this new API:
 ```typescript
 // as example above
-sendReminderJob.withArgs(...).run(configObject);
-// equivalent to Jobs.clear('*', 'sendReminder', '*', ...args);
-sendReminderJob.clear('*', ...args);
-// NEW API equivalent to Jobs.collection.clear({...query, name: 'sendReminderJob');
-sendReminderJob.clearQuery(query);
+await sendReminderJob.withArgs(...).runAsync(configObject);
+// equivalent to await Jobs.clearAsync('*', 'sendReminder', '*', ...args);
+await sendReminderJob.clearAsync('*', ...args);
+// NEW API equivalent to await Jobs.collection.clearAsync({...query, name: 'sendReminderJob');
+await sendReminderJob.clearQueryAsync(query);
 
-// same as Jobs.remove(....), but without having to import "Jobs"
-const scheduledJob: JobDocument | false = myJob.withArgs(...).run(...);
-sendReminderJob.remove(scheduledJob);
+// same as await Jobs.removeAsync(....), but without having to import "Jobs"
+const scheduledJob: JobDocument | false = await myJob.withArgs(...).runAsync(...);
+await sendReminderJob.removeAsync(scheduledJob);
 // or
-sendReminderJob.remove(scheduledJob._id);
+await sendReminderJob.removeAsync(scheduledJob._id);
 
-// equivalent to Jobs.start('sendReminders');
-sendReminderJob.start();
-// equivalent to Jobs.stop('sendReminders');
-sendReminderJob.stop();
-// equivalent to Jobs.count('sendReminders', 'jon@example.com');
-sendReminderJob.count('jon@example.com');
-// equivalent to Jobs.findOne('sendReminders', 'jon@example.com');
-sendReminderJob.findOne('jon@example.com');
-// this is new API equivalent to Jobs.update({query, ..name: 'sendReminderJob'}, options);
-sendReminderJob.update(query, options);
+// equivalent to await Jobs.startAsync('sendReminders');
+await sendReminderJob.startAsync();
+// equivalent to await Jobs.stopAsync('sendReminders');
+await sendReminderJob.stopAsync();
+// equivalent to await Jobs.countAsync('sendReminders', 'jon@example.com');
+await sendReminderJob.countAsync('jon@example.com');
+// equivalent to await Jobs.findOneAsync('sendReminders', 'jon@example.com');
+await sendReminderJob.findOneAsync('jon@example.com');
+// this is new API equivalent to await Jobs.updateAsync({query, ..name: 'sendReminderJob'}, options);
+await sendReminderJob.updateAsync(query, options);
 
 // if you need to query the Jobs collection directly, the original name of the job can be obtained:
 sendReminderJob.name; // == 'sendReminders'
@@ -147,14 +152,14 @@ file where the job was defined, which by definition should be exposed on the ser
 Therefore, in shared client/server code (e.g. a Meteor Method) if you are used to doing:
 ```javascript
 if (Meteor.isServer) {
-	Jobs.run('sendEmail', 'jon@example.com', 'hello', {in: {days: 1}});
+	await Jobs.runAsync('sendEmail', 'jon@example.com', 'hello', {in: {days: 1}});
 }
 ```
-You have to be careful not to import the server-side code into the front-end, by using `import().then()`:
+You have to be careful not to import the server-side code into the front-end, so instead use `import().then()`:
 ```javascript
 if (Meteor.isServer) {
-	import('../../server/reminderJobs').then(({sendEmailJob}) => {
-		sendEmailJob.withArgs(...).run(...));
+	import('../../server/reminderJobs').then(async ({sendEmailJob}) => {
+		await sendEmailJob.withArgs(...).runAsync(...);
 	});
 }
 ```
@@ -165,14 +170,14 @@ if (Meteor.isServer) {
 
  - [Jobs.configure](#jobsconfigure)
  - [Jobs.register](#jobsregister)
- - [Jobs.run](#jobsrun)
- - [Jobs.execute](#jobsexecute)
- - [Jobs.reschedule](#jobsreschedule)
- - [Jobs.replicate](#jobsreplicate)
- - [Jobs.start](#jobsstart)
- - [Jobs.stop](#jobsstop)
- - [Jobs.clear](#jobsclear)
- - [Jobs.remove](#jobsremove)
+ - [Jobs.runAsync](#jobsrunasync)
+ - [Jobs.executeAsync](#jobsexecuteasync)
+ - [Jobs.rescheduleAsync](#jobsrescheduleasync)
+ - [Jobs.replicateAsync](#jobsreplicateasync)
+ - [Jobs.startAsync](#jobsstartasync)
+ - [Jobs.stopAsync](#jobsstopasync)
+ - [Jobs.clearAsync](#jobsclearasync)
+ - [Jobs.removeAsync](#jobsremoveasync)
  - [Jobs.jobs](#jobsjobs)
  - [Jobs.collection](#jobscollection)
  - [Repeating Jobs](#repeating-jobs)
@@ -216,55 +221,55 @@ Jobs.configure({
 
 ```typescript
 Jobs.register({
-	sendEmail: function (to, content) {
-		var send = Magic.sendEmail(to, content);
+	sendEmail: async function (to, content) {
+		var send = await Magic.sendEmail(to, content);
 		if (send) {
-			this.success();
+			await this.successAsync();
 		} else {
-			this.reschedule({in: {minutes: 5}});
+			await this.rescheduleAsync({in: {minutes: 5}});
 		}
 	},
-	sendReminder: function (userId, content) {
-		var doc = Reminders.insert({
+	sendReminder: async function (userId, content) {
+		var doc = await Reminders.insertAsync({
 			to: userId,
 			content: content
 		})
 
 		if (doc) {
-			this.remove();
+			await this.removeAsync();
 		} else {
-			this.reschedule({in: {minutes: 5}});
+			await this.rescheduleAsync({in: {minutes: 5}});
 		}
 	}
 });
 
 // or NEW API:
-const sendEmail = new TypedJob('sendEmail', function(to: string, content: EmailDoc) {
+const sendEmail = new TypedJob('sendEmail', async function(to: string, content: EmailDoc) {
 	...
 });
-const sendReminder = new TypedJob('sendReminder', function(to: string, content: ReminderContent) {
+const sendReminder = new TypedJob('sendReminder', async function(to: string, content: ReminderContent) {
 	...
 });
 ```
 
 Each job is bound with a set of functions to give you maximum control over how the job runs:
  - `this.document` - access the job document
- - `this.success()` - tell the queue the job is completed
- - `this.failure()` - tell the queue the job failed
- - `this.reschedule(config)` - tell the queue to schedule the job for a future date
- - `this.remove()` - remove the job from the queue
- - `this.replicate(config)` - create a copy of the job with a different due date provided by `config` (returns the new jobId)
+ - `this.successAsync()` - tell the queue the job is completed
+ - `this.failureAsync()` - tell the queue the job failed
+ - `this.rescheduleAsync(config)` - tell the queue to schedule the job for a future date
+ - `this.removeAsync()` - remove the job from the queue
+ - `this.replicateAsync(config)` - create a copy of the job with a different due date provided by `config` (returns the new jobId)
 
 Each job must be resolved with success, failure, reschedule, and/or remove.
 
 See [Repeating Jobs](#repeating-jobs) and [Async Jobs/Promises](#async-jobs)
 
-### Jobs.run
+### Jobs.runAsync
 
-`Jobs.run` allows you to schedule a job to run. You call it just like you would call a method, by specifying the job name and its arguments. At the end, you can pass in a special configuration object. Otherwise, it will be scheduled to run as soon as possible.
+`Jobs.runAsync` allows you to schedule a job to run. You call it just like you would call a method, by specifying the job name and its arguments. At the end, you can pass in a special configuration object. Otherwise, it will be scheduled to run immediately.
 
 ```javascript
-var jobDoc = Jobs.run("sendReminder", "jon@example.com", "The future is here!", {
+var jobDoc = await Jobs.runAsync("sendReminder", "jon@example.com", "The future is here!", {
     in: {
         days: 3,
     },
@@ -272,14 +277,13 @@ var jobDoc = Jobs.run("sendReminder", "jon@example.com", "The future is here!", 
         hour: 9,
         minute: 42
     },
-    priority: 9999999999,
     singular: true
 });
 
 // or NEW API:
-sendReminderJob.withArgs("jon@example.com", "The future is here!").run(...);
+await sendReminderJob.withArgs("jon@example.com", "The future is here!").runAsync(...);
 ```
-`Jobs.run` returns a `jobDoc`.
+`Jobs.runASync` returns a `jobDoc`.
 
 The configuration object supports the following inputs:
 
@@ -307,83 +311,82 @@ The configuration object supports the following inputs:
 - **`callback`** - Function
 	- Run a callback function after scheduling the job
 
-### Jobs.execute
+### Jobs.executeAsync
 
-`Jobs.execute` allows you to run a job ahead of its due date. It can only work on jobs that have not been resolved.
+`Jobs.executeAsync` allows you to run a job ahead of its due date. It can only work on jobs that have not been resolved.
 
 ```javascript
-Jobs.execute(doc) // or (doc._id)
+await Jobs.executeAsync(doc) // or (doc._id)
 // or NEW API
-sendReminderJob.execute(doc); // or (doc._id)
+await sendReminderJob.executeAsync(doc); // or (doc._id)
 ```
 
-### Jobs.reschedule
+### Jobs.rescheduleAsync
 
-`Jobs.reschedule` allows you to reschedule a job. It can only work on jobs that have not been resolved.
+`Jobs.rescheduleAsync` allows you to reschedule a job. It can only work on jobs that have not been resolved.
 
 ```javascript
-Jobs.reschedule(job, { // or (job._id)
+await Jobs.rescheduleAsync(job, { // or (job._id)
 	in: {
 		minutes: 5
 	},
-	priority: 9999999
 });
 // or NEW API
-sendReminderJob.execute(job, {...}); // or (job._id, {...});
+await sendReminderJob.rescheduleAsync(job, {...}); // or (job._id, {...});
 ```
 
 The configuration is passed in as the second argument, and it supports the same inputs as `Jobs.run`.
 
-### Jobs.replicate
+### Jobs.replicateAsync
 
-`Jobs.replicate` allows you to replicate a job.
+`Jobs.replicateAsync` allows you to replicate a job.
 
 ```javascript
-var jobId = Jobs.replicate(job, { // or (job._id, {...
+var jobId = await Jobs.replicateAsync(job, { // or (job._id, {...
 	in: {
 		minutes: 5
 	}
 })
 // or NEW API
-sendReminderJob.execute(job, {...}); // or (job._id, {...});
+await sendReminderJob.replicateAsync(job, {...}); // or (job._id, {...});
 ```
 
-`Jobs.replicate` returns a `jobId`.
+`Jobs.replicateAsync` returns a `jobId`.
 
-### Jobs.start
+### Jobs.startAsync
 
-`Jobs.start` allows you start all the queues. This runs automatically unless `autoStart` is set to `false`. If you call the function with no arguments, it will start all the queues. If you pass in a String, it will start a queue with that name. If you pass in an Array, it will start all the queues named in the array.
+`Jobs.startAsync` allows you start all the queues. This runs automatically unless `autoStart` is set to `false`. If you call the function with no arguments, it will start all the queues. If you pass in a String, it will start a queue with that name. If you pass in an Array, it will start all the queues named in the array.
 
 ```javascript
 // Start all the queues
-Jobs.start()
+await Jobs.startAsync()
 
 // Start just one queue
-Jobs.start("sendReminder")
+await Jobs.startAsync("sendReminder")
 // or NEW API
-sendReminderJob.start();
+await sendReminderJob.startAsync();
 
 // Start multiple queues
-Jobs.start(["sendReminder", "sendEmail"])
+await Jobs.startAsync(["sendReminder", "sendEmail"])
 ```
 Unlike msavin:sjobs, this function can be called on any server and whichever server is currently in control of the job queue will be notified.
 
 
-### Jobs.stop
+### Jobs.stopAsync
 
-`Jobs.stop` allows you stop all the queues. If you call the function with no arguments, it will stop all the queues. If you pass in a String, it will stop a queue with that name. If you pass in an Array, it will stop all the queues named in the array.
+`Jobs.stopAsync` allows you stop all the queues. If you call the function with no arguments, it will stop all the queues. If you pass in a String, it will stop a queue with that name. If you pass in an Array, it will stop all the queues named in the array.
 
 ```javascript
 // Stop all the queues
-Jobs.stop()
+await Jobs.stopAsync()
 
 // Stop just one queue
-Jobs.stop("sendReminder")
+await Jobs.stopAsync("sendReminder")
 // or NEW API
-sendReminderJob.stop();
+await sendReminderJob.stopAsync();
 
 // Stop multiple queues
-Jobs.stop(["sendReminder", "sendEmail"])
+await Jobs.stopAsync(["sendReminder", "sendEmail"])
 ```
 Unlike msavin:sjobs, this function can be called on any server and whichever server is currently in control of the job queue will be notified.
 
@@ -393,17 +396,17 @@ mongo> db.jobs_dominator_3.update({_id:"dominatorId"}, {$set: {pausedJobs: ['*']
 ```
 The in-control server should observe the change and stop instantly. Use `{$unset: {pausedJobs: 1}}` or `{$set: {pausedJobs: []}}` to start all the queues again.
 
-### Jobs.clear
+### Jobs.clearAsync
 
-`Jobs.clear` allows you to clear all or some of the jobs in your database.
+`Jobs.clearAsync` allows you to clear all or some of the jobs in your database.
 ```javascript
-var count = Jobs.clear(state, jobName, ...arguments, callback);
+var count = await Jobs.clearAsync(state, jobName, ...arguments, callback);
 e.g:
-count = Jobs.clear(); 		// remove all completed jobs (success or failure)
-count = Jobs.clear('*');	// remove all jobs
-count = Jobs.clear('failure', 'sendEmail', 'jon@example.com', function(err, count) {console.log(err, count)});
+count = await Jobs.clearAsync();    // remove all completed jobs (success or failure)
+count = await Jobs.clearAsync('*'); // remove all jobs
+count = await Jobs.clearAsync('failure', 'sendEmail', 'jon@example.com', function(err, count) {console.log(err, count)});
 // or NEW API
-count = sendEmailJob.clear('failure', 'jon@example.com', ...);
+count = await sendEmailJob.clearAsync('failure', 'jon@example.com', ...);
 ```
 Parameters:
 * `state` for selecting a job state (either `pending`, `success`, `failure`, or `*` to select all of them), or omit to all except `pending` jobs.
@@ -411,14 +414,14 @@ Parameters:
 * provide `arguments` to match jobs only with the same arguments.
 * `callback` to provide a callback function with `error` and `result` parameters, where `result` is the number of jobs removed.
 
-### Jobs.remove
+### Jobs.removeAsync
 
-`Jobs.remove` allows you to remove a job from the collection.
+`Jobs.removeAsync` allows you to remove a job from the collection.
 
 ```javascript
-var success = Jobs.remove(doc); // or (doc._id)
+var success = await Jobs.removeAsync(doc); // or (doc._id)
 // or NEW API
-sendEmailJob.remove(doc); // or (doc._id)
+await sendEmailJob.removeAsync(doc); // or (doc._id)
 ```
 
 ### Jobs.jobs
@@ -435,19 +438,19 @@ var nJobTypes = jobNames.length;        // 2
 
 ## Repeating jobs
 
-Repeating jobs can be created by using `this.reschedule()` in the job function, e.g.:
+Repeating jobs can be created by using `this.rescheduleAsync()` in the job function, e.g.:
 ```javascript
 Jobs.register({
-	processMonthlyPayments() {
-		this.reschedule({in: {months: 1}});
-		processPayments();
+	async processMonthlyPayments() {
+		await this.rescheduleAsync({in: {months: 1}});
+		await processPayments();
 	},
 });
 
-Jobs.run('processMonthlyPayments', {singular: true});
+await Jobs.runAsync('processMonthlyPayments', {singular: true});
 ```
 
-Since this package doesn't keep a job history (compared with msavin:sjobs), you can use `this.reschedule()` indefinitely without polluting the jobs database, instead of having to use `this.replicate()` followed by `this.remove()`.
+Since this package doesn't keep a job history (compared with msavin:sjobs), you can use `this.rescheduleAsync()` indefinitely without polluting the jobs database, instead of having to use `this.replicateAsync()` followed by `this.removeAsync()`.
 
 ## Async Jobs
 
@@ -456,11 +459,11 @@ The job function can use `async/await` or return a promise:
 Jobs.register({
 	async asyncJob(...args) {
 		await new Promise(resolve => Meteor.setTimeout(() => resolve(0), 4000));
-		this.remove();
+		await this.removeAsync();
 	},
 	promiseJob(...args) {
-		return new Promise(resolve => Meteor.setTimeout(() => {
-			this.remove();
+		return new Promise(resolve => Meteor.setTimeout(async () => {
+			await this.remove();
 			resolve(0);
 		}, 8000));
 	},
@@ -480,6 +483,7 @@ The job queue intelligently prevents lots of a single job dominating the job que
 ## API Differences From msavin:sjobs
 If any of these differences make this package unsuitable for you, please let me know and I'll consider fixing.
 
+- Since v2.0 of this package, most methods have been renamed from `...method()` to `...methodAsync()` and are asynchronous.
 - This package doesn't keep a job history.
 - `failed` jobs are not retried, unless they have already been rescheduled.
 - The Job configuration object doesn't support the `data` attribute - I never found any use for this.
@@ -493,16 +497,19 @@ If any of these differences make this package unsuitable for you, please let me 
   - `setServerId` can be a `String` as as well as a `Function`
   - `log` can be a `Boolean` as well as a `Function`
 - In a [job function](#jobsregister), `this.set()` and `this.get()` are not provided - I never found any use for this.
-- In a [job function](#jobsregister), `this.success()` and `this.failure()` to not take a `result` parameter - this package doesn't keep a job history
+- In a [job function](#jobsregister), `this.successAsync()` and `this.failureAsync()` to not take a `result` parameter - this package doesn't keep a job history
 - [singular](#jobsrun) jobs only check for `pending` jobs of the same name, so they can be run again even if a previous job failed.
-- `Jobs.start()` and `Jobs.stop()` can be called on any server and whichever server is in control of the job queue will be notified.
-- `Jobs.cancel()` doesn't exist. Just remove it with [Jobs.remove()](#jobsremove) - I don't see the point in keeping old jobs lying around.
-- [Jobs.clear()](#jobsclear) can take additional `argument` parameters to only delete jobs matching those arguments.
+- `Jobs.startAsync()` and `Jobs.stopAsync()` can be called on any server and whichever server is in control of the job queue will be notified.
+- `Jobs.cancel()` doesn't exist. Just remove it with [Jobs.removeAsync()](#jobsremove) - I don't see the point in keeping old jobs lying around.
+- [Jobs.clearAsync()](#jobsclear) can take additional `argument` parameters to only delete jobs matching those arguments.
 - [Jobs.jobs](#jobsjobs) doesn't exist in msavin:sjobs
 
 ------
 
 ## Version History
+
+#### 2.0.0 (2023-12-20)
+- **BREAKING CHANGE** New asynchronous API for Meteor 3.0 compatibility/
 
 #### 1.0.18 (2023-08-19)
 - Added new [strongly-typed API](#new-strongly-typed-api).

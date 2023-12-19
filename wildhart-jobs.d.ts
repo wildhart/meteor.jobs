@@ -9,7 +9,7 @@ declare module 'meteor/wildhart:jobs' {
             maxWait: number,
             log: typeof console.log | boolean;
             autoStart: boolean;
-            setServerId?: string | Function;
+            setServerId?: string | (() => string);
             defaultCompletion?: 'success' | 'remove';
         }
 
@@ -40,7 +40,7 @@ declare module 'meteor/wildhart:jobs' {
             awaitAsync: boolean;
             unique: boolean;
             singular: boolean;
-            callback?: Function;
+            callback?: (err: string | null, res: any) => void | Promise<void>;
         }
 
         type JobStatus = "pending" | "success" | "failure" | "executing";
@@ -58,11 +58,11 @@ declare module 'meteor/wildhart:jobs' {
 
         interface JobThisType {
             document: JobDocument;
-            replicate(config: Partial<JobConfig>): string | null | false;
-            reschedule(config: Partial<JobConfig>): void;
-            remove(): boolean;
-            success(): void;
-            failure(): void;
+            replicateAsync(config: Partial<JobConfig>): Promise<string | null | false>;
+            rescheduleAsync(config: Partial<JobConfig>): Promise<void>;
+            removeAsync(): Promise<boolean>;
+            successAsync(): Promise<void>;
+            failureAsync(): Promise<void>;
         }
 
         type JobFunction<TArgs extends any[]> = (this: JobThisType, ...args: TArgs) => void;
@@ -74,17 +74,17 @@ declare module 'meteor/wildhart:jobs' {
 
         function configure(options: Partial<Config>): void;
         function register(jobFunctions: JobFunctions): void;
-        function run(jobName: string, ...args: any[]): JobDocument | false;
-        function execute(jobOrId: JobOrId): void;
-        function replicate(jobOrId: JobOrId, config: Partial<JobConfig>): string | null;
-        function reschedule(jobOrId: JobOrId, config: Partial<JobConfig>): void;
-        function remove(jobOrId: JobOrId): boolean;
-        function clear(state?: '*' | JobStatus | JobStatus[], jobName?: string, ...args: any[]): number;
-        function findOne(jobName: string, ...args: any[]): JobDocument;
-        function count(jobName: string, ...args: any[]): number;
-        function countPending(jobName: string, ...args: any[]): number;
-        function start(jobNames?: string | string[]): void;
-        function stop(jobNames?: string | string[]): void;
+        function runAsync(jobName: string, ...args: any[]): Promise<JobDocument | false>;
+        function executeAsync(jobOrId: JobOrId): Promise<void>;
+        function replicateAsync(jobOrId: JobOrId, config: Partial<JobConfig>): Promise<string | null>;
+        function rescheduleAsync(jobOrId: JobOrId, config: Partial<JobConfig>): Promise<void>;
+        function removeAsync(jobOrId: JobOrId): Promise<boolean>;
+        function clearAsync(state?: '*' | JobStatus | JobStatus[], jobName?: string, ...args: any[]): Promise<number>;
+        function findOneAsync(jobName: string, ...args: any[]): Promise<JobDocument>;
+        function countAsync(jobName: string, ...args: any[]): Promise<number>;
+        function countPendingAsync(jobName: string, ...args: any[]): Promise<number>;
+        function startAsync(jobNames?: string | string[]): Promise<void>;
+        function stopAsync(jobNames?: string | string[]): Promise<void>;
     }
 
 	export class TypedJob<TArgs extends any[]> {
@@ -92,19 +92,19 @@ declare module 'meteor/wildhart:jobs' {
         public name: string;
 
 		public withArgs(...args: TArgs): {
-		    run: (config?: Partial<Jobs.JobConfig>) => Jobs.JobDocument | false;
+		    runAsync: (config?: Partial<Jobs.JobConfig>) => Jobs.JobDocument | false;
 		}
-		public clear(state: '*' | Jobs.JobStatus | Jobs.JobStatus[], ...args: PartialArray<TArgs>): number;
-		public clearQuery(query: Mongo.Selector<Jobs.JobDocument>): void;
-        public remove(jobOrId: JobOrId): boolean
-        public execute(jobOrId: JobOrId): false | undefined;
-        public reschedule(jobOrId: JobOrId, config: Partial<Jobs.JobConfig>): false | undefined;
-        public replicate(jobOrId: JobOrId, config: Partial<Jobs.JobConfig>): false | undefined;
-		public start(): void;
-		public stop(): void;
-        public count(...args: PartialArray<TArgs>): number;
-		public update(selector: string | Mongo.Selector<Jobs.JobDocument>, options: Mongo.Modifier<Jobs.JobDocument>): number;
-		public findOne(...args: PartialArray<TArgs>): Jobs.JobDocument | undefined;
+		public clearAsync(state: '*' | Jobs.JobStatus | Jobs.JobStatus[], ...args: PartialArray<TArgs>): Promise<number>;
+		public clearQueryAsync(query: Mongo.Selector<Jobs.JobDocument>): Promise<void>;
+        public removeAsync(jobOrId: JobOrId): Promise<boolean>;
+        public executeAsync(jobOrId: JobOrId): Promise<false | undefined>;
+        public rescheduleAsync(jobOrId: JobOrId, config: Partial<Jobs.JobConfig>): Promise<false | undefined>;
+        public replicateAsync(jobOrId: JobOrId, config: Partial<Jobs.JobConfig>): Promise<false | undefined>;
+		public startAsync(): Promise<void>;
+		public stopAsync(): Promise<void>;
+        public countAsync(...args: PartialArray<TArgs>): Promise<number>;
+		public updateAsync(selector: string | Mongo.Selector<Jobs.JobDocument>, options: Mongo.Modifier<Jobs.JobDocument>): Promise<number>;
+		public findOneAsync(...args: PartialArray<TArgs>): Promise<Jobs.JobDocument | undefined>;
 	}
 }
 

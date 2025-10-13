@@ -45,7 +45,7 @@ namespace Dominator {
 			|| (typeof settings.setServerId == 'function' && settings.setServerId())
 			|| Random.id();
 
-		collection.find({_id: DOMINATOR_ID}).observe({
+		await collection.find({_id: DOMINATOR_ID}).observeAsync({
 			changed: (newPing) => _observer(newPing),
 		});
 
@@ -123,7 +123,7 @@ namespace Dominator {
 	async function _takeControl(reason: string) {
 		log('Jobs', 'takeControl', reason);
 		await _ping();
-		Queue.start();
+		await Queue.start();
 	}
 
 	function _relinquishControl() {
@@ -462,7 +462,7 @@ namespace Queue {
 	var _executing = false;
 	var _awaitAsyncJobs = new Set<string>();
 
-	export function start() {
+	export async function start() {
 		if (_handle && _handle != PAUSED) {
 			stop(); // this also clears any existing job timeout
 		}
@@ -470,14 +470,14 @@ namespace Queue {
 		log('Jobs', 'queue.start paused:', pausedJobs);
 
 		// don't bother creating an observer if all jobs are paused
-		_handle = pausedJobs[0]=='*' ? PAUSED : Jobs.collection.find({
+		_handle = pausedJobs[0]=='*' ? PAUSED : await Jobs.collection.find({
 			state: "pending",
 			name: {$nin: pausedJobs},
 		}, {
 			limit: 1,
 			sort: {due: 1},
 			fields: {name: 1, due: 1},
-		}).observe({
+		}).observeAsync({
 			changed: (job) => _observer('changed', job),
 			added: (job) => _observer('added', job),
 		});
@@ -568,7 +568,7 @@ namespace Queue {
 		}
 
 		_executing = false;
-		start();
+		await start();
 	}
 
 	export async function executeJob(job: Jobs.JobDocument) {

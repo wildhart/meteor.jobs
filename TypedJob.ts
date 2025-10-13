@@ -13,7 +13,7 @@ export default class TypedJob<TArgs extends any[]> {
 
 	public clear = (state: '*' | Jobs.JobStatus | Jobs.JobStatus[], ...args: PartialArray<TArgs>) => Jobs.clear(state, this.name, ...args);
 
-	public clearQuery = (query: Mongo.Selector<Jobs.JobDocument>) => Jobs.collection.remove({...query, name: this.name});
+	public clearQuery = async (query: any) => await Jobs.collection.removeAsync({...query, name: this.name});
 
 	public remove = (jobOrId: JobOrId) => Jobs.remove(jobOrId);
 
@@ -29,9 +29,9 @@ export default class TypedJob<TArgs extends any[]> {
 
 	public count = (...args: PartialArray<TArgs>) => Jobs.count(this.name, ...args);
 
-	public update: Mongo.Collection<Jobs.JobDocument>['update'] = (selector, options) => {
+	public update = async (selector: any, options: any) => {
 		const mySelector = typeof selector == 'string' ? selector : {...selector, name: this.name};
-		return Jobs.collection.update(mySelector, options);
+		return await Jobs.collection.updateAsync(mySelector, options);
 	}
 
 	public findOne = (...args: PartialArray<TArgs>) => Jobs.findOne(this.name, ...args);

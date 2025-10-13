@@ -1,7 +1,11 @@
 # Meteor Jobs
 (inspired heavily by [msavin:sjobs](https://github.com/msavin/SteveJobs..meteor.jobs.scheduler.queue.background.tasks))
 
-Run scheduled tasks with the simple jobs queue made just for Meteor. With tight MongoDB integration and fibers-based timing functions, this package is quick, reliable and effortless to use.
+Run scheduled tasks with the simple jobs queue made just for Meteor. With tight MongoDB integration, this package is quick, reliable and effortless to use.
+
+## Version 2.0.0 - Meteor 3.0 Compatible
+
+Version 2.0.0 has been fully migrated to support **Meteor 3.0's async database operations**. All database operations now use async/await patterns.
 
  - Jobs run on one server at a time
  - Jobs run predictably and consecutively
@@ -71,6 +75,87 @@ Jobs.run("sendReminder", "jon@example.com", "The future is here!", {
 });
 ```
 The configuration object supports `date`, `in`, `on`, and `priority`, all of which are completely optional, see [Jobs.run](#jobsrun).
+
+## Migration Guide for Meteor 3.0 (v2.0.0)
+
+Version 2.0.0 introduces **breaking changes** to support Meteor 3.0's async database operations. All major API methods now return Promises and must be awaited.
+
+### Breaking Changes
+
+**All API methods are now async and return Promises:**
+
+```javascript
+// OLD (v1.x):
+const jobDoc = Jobs.run("sendEmail", email, message);
+Jobs.remove(jobDoc);
+const count = Jobs.count("sendEmail");
+
+// NEW (v2.0+):
+const jobDoc = await Jobs.run("sendEmail", email, message);
+await Jobs.remove(jobDoc);
+const count = await Jobs.count("sendEmail");
+```
+
+**Job context methods inside job functions are now async:**
+
+```javascript
+// OLD (v1.x):
+Jobs.register({
+    sendEmail: function(to, message) {
+        sendEmail(to, message);
+        this.success();  // or this.remove(), this.reschedule(), etc.
+    }
+});
+
+// NEW (v2.0+):
+Jobs.register({
+    sendEmail: async function(to, message) {
+        await sendEmail(to, message);
+        await this.success();  // Must await all context methods
+    }
+});
+```
+
+**All Jobs API methods requiring await:**
+- `Jobs.run()` - Schedule a job
+- `Jobs.execute()` - Execute a job immediately
+- `Jobs.remove()` - Remove a job
+- `Jobs.clear()` - Clear jobs
+- `Jobs.replicate()` - Replicate a job
+- `Jobs.reschedule()` - Reschedule a job
+- `Jobs.findOne()` - Find a job
+- `Jobs.count()` - Count jobs
+- `Jobs.countPending()` - Count pending jobs
+- `Jobs.start()` - Start job queues
+- `Jobs.stop()` - Stop job queues
+
+**TypedJob API is also fully async:**
+
+```javascript
+// NEW (v2.0+):
+await sendReminderJob.withArgs('jon@example.com', 'Hello').run({in: {days: 1}});
+await sendReminderJob.clear('*', 'arg1');
+const count = await sendReminderJob.count('arg1');
+```
+
+### Job Function Recommendations
+
+Your job functions can now be `async` and use `await`:
+
+```javascript
+Jobs.register({
+    async processPayment(userId, amount) {
+        const user = await Users.findOneAsync(userId);
+        const result = await stripe.charges.create({...});
+
+        if (result.success) {
+            await this.success();
+        } else {
+            await this.reschedule({in: {minutes: 5}});
+        }
+    }
+});
+```
 
 ## New Strongly Typed API
 
@@ -503,6 +588,17 @@ If any of these differences make this package unsuitable for you, please let me 
 ------
 
 ## Version History
+
+#### 2.0.0 (2025-01-XX)
+- **BREAKING CHANGE**: Full migration to Meteor 3.0 async database operations
+- All database operations now use `async`/`await` patterns
+- `Jobs.run()`, `Jobs.execute()`, `Jobs.remove()`, `Jobs.clear()`, `Jobs.replicate()`, `Jobs.reschedule()`, `Jobs.findOne()`, `Jobs.count()`, `Jobs.countPending()`, `Jobs.start()`, and `Jobs.stop()` now return Promises
+- Job context methods (`this.success()`, `this.failure()`, `this.remove()`, `this.reschedule()`, `this.replicate()`) are now async
+- Replaced deprecated `_ensureIndex()` with `createIndexAsync()`
+- All Mongo collection operations migrated to async methods (`insertAsync`, `updateAsync`, `removeAsync`, `findOneAsync`, `countAsync`, `upsertAsync`)
+- TypedJob class methods now return Promises
+- Updated TypeScript definitions for async methods
+- Package version constraint updated to support Meteor 3.0 and TypeScript 5.0
 
 #### 1.0.18 (2023-08-19)
 - Added new [strongly-typed API](#new-strongly-typed-api).

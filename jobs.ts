@@ -548,11 +548,12 @@ namespace Queue {
 				doneJobs = [];
 				do {
 					// always use the live version of dominator.lastPing.pausedJobs in case jobs are paused/restarted while executing
-					const lastPing = await Dominator.collection.findOneAsync({}, {fields: {pausedJobs: 1}})!;
+					const lastPing = await Dominator.collection.findOneAsync({}, {fields: {pausedJobs: 1}});
+					const pausedJobs = lastPing?.pausedJobs || [];
 					job = await Jobs.collection.findOneAsync({
 						state: "pending",
 						due: {$lte: new Date()},
-						name: {$nin: doneJobs.concat(lastPing.pausedJobs, Array.from(_awaitAsyncJobs))}, // give other job types a chance...
+						name: {$nin: doneJobs.concat(pausedJobs, Array.from(_awaitAsyncJobs))}, // give other job types a chance...
 						_id: {$ne: lastJobId}, // protect against stale reads of the job we just executed
 					}, {sort: {due: 1, priority: -1}});
 					if (job) {
@@ -560,8 +561,8 @@ namespace Queue {
 						await executeJob(job);
 						doneJobs.push(job.name); // don't do this job type again until we've tried other jobs.
 					}
-				} while (Dominator.lastPing!.pausedJobs.indexOf('*') == -1 && job);
-			} while (Dominator.lastPing!.pausedJobs.indexOf('*') == -1 && doneJobs.length);
+				} while ((Dominator.lastPing?.pausedJobs || []).indexOf('*') == -1 && job);
+			} while ((Dominator.lastPing?.pausedJobs || []).indexOf('*') == -1 && doneJobs.length);
 		} catch(e) {
 			console.warn('Jobs', 'executeJobs ERROR');
 			console.warn(e);

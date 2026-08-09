@@ -3,17 +3,21 @@
 
 Run scheduled tasks with the simple jobs queue made just for Meteor. With tight MongoDB integration, this package is quick, reliable and effortless to use.
 
-## Version 2.0.0 - Meteor 3.0 Compatible
-
-Version 2.0.0 has been fully migrated to support **Meteor 3.0's async database operations**. All database operations now use async/await patterns.
-
- - Jobs run on one server at a time
- - Jobs run predictably and consecutively
- - Job timers are super-efficient
- - Jobs are stored in MongoDB
- - No third party dependencies
+- Jobs run on one server at a time
+- Jobs run predictably and consecutively
+- Job timers are super-efficient
+- Jobs are stored in MongoDB
+- No third party dependencies
 
 It can run hundreds of jobs in seconds with minimal CPU impact, making it a reasonable choice for many applications. To get started, check out the **[quick start guide](#quick-start)** and the **[full API documentation](#api-documentation)** below.
+
+## Version 2.0.0 - async API (BREAKING CHANGE), Meteor 3.0 compatible
+
+Version 2.0.0 is **async-only**: every API method now returns a Promise which must be awaited, including the `this.*` methods inside your job functions - see the **[migration guide](#migration-guide-for-v20-async-api)**. Which version you should install:
+
+- **Meteor 3.0+**: use v2.0.0.
+- **Meteor 2.8 - 2.x**: v2.0.0 works (it uses the async MongoDB API introduced in Meteor 2.8), provided *all* your calls are awaited as per the migration guide. Un-awaited fiber-style code will misbehave silently (a returned Promise is always truthy). This lets you migrate your app to async/await while still on Meteor 2.x, before bumping to Meteor 3.
+- **Meteor < 2.8, or still using fiber-style sync calls?** Stay on the previous major version: `meteor add wildhart:jobs@1.0.18`. v1.x works on Meteor 2.x and below, but not on Meteor 3.
 
 ## Coming from msavin:jobs?
 
@@ -76,9 +80,9 @@ Jobs.run("sendReminder", "jon@example.com", "The future is here!", {
 ```
 The configuration object supports `date`, `in`, `on`, and `priority`, all of which are completely optional, see [Jobs.run](#jobsrun).
 
-## Migration Guide for Meteor 3.0 (v2.0.0)
+## Migration Guide for v2.0 (async API)
 
-Version 2.0.0 introduces **breaking changes** to support Meteor 3.0's async database operations. All major API methods now return Promises and must be awaited.
+Version 2.0.0 introduces **breaking changes** to support Meteor 3.0's async database operations. All major API methods now return Promises and must be awaited. The same async API also runs on Meteor 2.8 - 2.x (which introduced the async MongoDB methods), so you can migrate your app to async/await before upgrading to Meteor 3.
 
 ### Breaking Changes
 
@@ -589,7 +593,7 @@ If any of these differences make this package unsuitable for you, please let me 
 
 ## Version History
 
-#### 2.0.0 (2025-01-XX)
+#### 2.0.0 (2026-08-10)
 - **BREAKING CHANGE**: Full migration to Meteor 3.0 async database operations
 - All database operations now use `async`/`await` patterns
 - `Jobs.run()`, `Jobs.execute()`, `Jobs.remove()`, `Jobs.clear()`, `Jobs.replicate()`, `Jobs.reschedule()`, `Jobs.findOne()`, `Jobs.count()`, `Jobs.countPending()`, `Jobs.start()`, and `Jobs.stop()` now return Promises
@@ -598,7 +602,7 @@ If any of these differences make this package unsuitable for you, please let me 
 - All Mongo collection operations migrated to async methods (`insertAsync`, `updateAsync`, `removeAsync`, `findOneAsync`, `countAsync`, `upsertAsync`)
 - TypedJob class methods now return Promises
 - Updated TypeScript definitions for async methods
-- Package version constraint updated to support Meteor 3.0 and TypeScript 5.0
+- Package version constraint updated to support Meteor 3.0 and TypeScript 5.0; minimum Meteor version is now 2.8.1 (the async MongoDB API is required)
 
 #### 1.0.18 (2023-08-19)
 - Added new [strongly-typed API](#new-strongly-typed-api).

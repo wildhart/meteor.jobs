@@ -33,42 +33,43 @@ namespace Dominator {
 	let _pingInterval: number | null =  null;
 	let _takeControlTimeout: number | null = null;
 
-	Meteor.startup(() => {
+	Meteor.startup(async () => {
 		log('Jobs', `Meteor.startup, startupDelay: ${settings.startupDelay / 1000}s...`);
-		collection.remove({_id: {$ne: DOMINATOR_ID}});
+		await collection.removeAsync({_id: {$ne: DOMINATOR_ID}});
+		await Jobs.createIndexes();
 		Meteor.setTimeout(() => init(), settings.startupDelay);
 	})
 
-	export function init() {
+	export async function init() {
 		_serverId = (typeof settings.setServerId == 'string' && settings.setServerId)
 			|| (typeof settings.setServerId == 'function' && settings.setServerId())
 			|| Random.id();
 
-		collection.find({_id: DOMINATOR_ID}).observe({
+		await collection.find({_id: DOMINATOR_ID}).observeAsync({
 			changed: (newPing) => _observer(newPing),
 		});
 
-		lastPing = collection.findOne();
+		lastPing = await collection.findOneAsync();
 		const lastPingIsOld = lastPing && lastPing.date && lastPing.date.valueOf() < Date.now() - settings.maxWait;
 		log('Jobs', 'startup', _serverId, JSON.stringify(lastPing), 'isOld='+lastPingIsOld);
 
 		// need !lastPing.serverId on following line in case Jobs.start() or Jobs.stop() updates pausedJobs before
 		if (!lastPing || !lastPing.serverId) {
 			// fresh installation, no one is in control yet.
-			_takeControl('no ping');
+			await _takeControl('no ping');
 		} else if (lastPing.serverId == _serverId) {
 			// we were in control but have restarted - resume control
-			_takeControl('restarted');
+			await _takeControl('restarted');
 		} else if (lastPingIsOld) {
 			// other server lost control - take over
-			_takeControl('lastPingIsOld ' + JSON.stringify(lastPing));
+			await _takeControl('lastPingIsOld ' + JSON.stringify(lastPing));
 		} else {
 			// another server is recently in control, set a timer to check the ping...
 			_observer(lastPing);
 		}
 	}
 
-	export function start(jobNames?: string[] | string) {
+	export async function start(jobNames?: string[] | string) {
 		const update: Mongo.Modifier<Document> = {}
 		if (!jobNames || jobNames == '*') {
 			// clear the pausedJobs list, start all jobs
@@ -77,11 +78,11 @@ namespace Dominator {
 			update.$pullAll = {pausedJobs: typeof jobNames == 'string' ? [jobNames] : jobNames};
 		}
 
-		collection.upsert({_id: DOMINATOR_ID}, update);
+		await collection.upsertAsync({_id: DOMINATOR_ID}, update);
 		log('Jobs', 'startJobs', jobNames, update);
 	}
 
-	export function stop(jobNames?: string[] | string) {
+	export async function stop(jobNames?: string[] | string) {
 		const update: Mongo.Modifier<Document> = {}
 		if (!jobNames || jobNames == '*') {
 			update.$set = {pausedJobs: ['*']}; // stop all jobs
@@ -89,7 +90,7 @@ namespace Dominator {
 			update.$addToSet = {pausedJobs: typeof jobNames == 'string' ? jobNames : {$each: jobNames}};
 		}
 
-		collection.upsert({_id: DOMINATOR_ID}, update);
+		await collection.upsertAsync({_id: DOMINATOR_ID}, update);
 		log('Jobs', 'stopJobs', jobNames, update);
 	}
 
@@ -119,10 +120,10 @@ namespace Dominator {
 		}
 	}
 
-	function _takeControl(reason: string) {
+	async function _takeControl(reason: string) {
 		log('Jobs', 'takeControl', reason);
-		_ping();
-		Queue.start();
+		await _ping();
+		await Queue.start();
 	}
 
 	function _relinquishControl() {
@@ -134,7 +135,7 @@ namespace Dominator {
 		Queue.stop();
 	}
 
-	function _ping() {
+	async function _ping() {
 		if (!_pingInterval) {
 			_pingInterval = Meteor.setInterval(() =>_ping(), settings.maxWait * 0.8);
 		}
@@ -146,7 +147,7 @@ namespace Dominator {
 		if (!lastPing) {
 			lastPing = newPing;
 		}
-		collection.upsert({_id: DOMINATOR_ID}, newPing);
+		await collection.upsertAsync({_id: DOMINATOR_ID}, newPing);
 		log('Jobs', 'ping', newPing.date, 'paused:', newPing.pausedJobs);
 	}
 }
@@ -191,11 +192,11 @@ export namespace Jobs {
 
 	export interface JobThisType {
 		document: JobDocument;
-		replicate(config: Partial<JobConfig>): string | null | false;
-		reschedule(config: Partial<JobConfig>): void;
-		remove(): boolean;
-		success(): void;
-		failure(): void;
+		replicate(config: Partial<JobConfig>): Promise<string | null | false>;
+		reschedule(config: Partial<JobConfig>): Promise<void>;
+		remove(): Promise<boolean>;
+		success(): Promise<void>;
+		failure(): Promise<void>;
 	}
 
     export type JobFunction<TArgs extends any[]> = (this: JobThisType, ...args: TArgs) => void;
@@ -206,7 +207,10 @@ export namespace Jobs {
 
 	export const collection = new Mongo.Collection<JobDocument>("jobs_data");
 
-	collection._ensureIndex({name: 1, due: 1, state: 1});
+	// Create index - will be called from startup
+	export async function createIndexes() {
+		await collection.createIndexAsync({name: 1, due: 1, state: 1});
+	}
 
 	export function configure(config: Partial<Config>) {
 		check(config, {
@@ -234,7 +238,7 @@ export namespace Jobs {
 
 	const isConfig = (input: any) => !!(input && typeof input == 'object' && configItems.some(i => typeof input[i] != 'undefined'));
 
-	export function run(name: string, ...args: any) {
+	export async function run(name: string, ...args: any) {
 		check(name, String);
 		log('Jobs', 'Jobs.run', name, args.length && args[0]);
 
@@ -245,10 +249,10 @@ export namespace Jobs {
 		}
 		var error;
 		if (config?.unique) { // If a job is marked as unique, it will only be scheduled if no other job exists with the same arguments
-			if (count(name, ...args)) error = "Unique job already exists";
+			if (await count(name, ...args)) error = "Unique job already exists";
 		}
 		if (config?.singular) { // If a job is marked as singular, it will only be scheduled if no other job is PENDING with the same arguments
-			if (countPending(name, ...args)) error = 'Singular job already exists';
+			if (await countPending(name, ...args)) error = 'Singular job already exists';
 		}
 		if (error) {
 			log('Jobs', '  ' + error);
@@ -266,7 +270,7 @@ export namespace Jobs {
 			created: new Date(),
 			awaitAsync: config?.awaitAsync || undefined,
 		};
-		const jobId = collection.insert(jobDoc);
+		const jobId = await collection.insertAsync(jobDoc);
 		if (jobId) {
 			jobDoc._id = jobId;
 		} else {
@@ -279,7 +283,7 @@ export namespace Jobs {
 		return error ? false : jobDoc as JobDocument;
 	}
 
-	export function execute(jobOrId: JobOrId) {
+	export async function execute(jobOrId: JobOrId) {
 		if (!jobOrId) {
 			console.warn('Jobs', '    Jobs.execute', 'JOB NOT FOUND', jobOrId);
 			return false;
@@ -287,7 +291,7 @@ export namespace Jobs {
 		const jobId = typeof jobOrId == 'string' ? jobOrId : jobOrId._id;
 		check(jobId, String);
 		log('Jobs', 'Jobs.execute', jobId);
-		const job = collection.findOne(jobId);
+		const job = await collection.findOneAsync(jobId);
 		if (!job) {
 			console.warn('Jobs', 'Jobs.execute', 'JOB NOT FOUND', jobId);
 			return;
@@ -297,10 +301,10 @@ export namespace Jobs {
 			return;
 		}
 
-		Queue.executeJob(job);
+		await Queue.executeJob(job);
 	}
 
-	export function replicate(jobOrId: JobOrId, config: Partial<JobConfig>) {
+	export async function replicate(jobOrId: JobOrId, config: Partial<JobConfig>) {
 		if (!jobOrId) {
 			console.warn('Jobs', '    Jobs.replicate', 'JOB NOT FOUND', jobOrId);
 			return false;
@@ -308,7 +312,7 @@ export namespace Jobs {
 		const jobId = typeof jobOrId == 'string' ? jobOrId : jobOrId._id;
 		check(jobId, String);
 		const date = getDateFromConfig(config);
-		const job = collection.findOne(jobId);
+		const job = await collection.findOneAsync(jobId);
 		if (!job) {
 			console.warn('Jobs', '    Jobs.replicate', 'JOB NOT FOUND', jobId);
 			return null;
@@ -317,12 +321,12 @@ export namespace Jobs {
 		delete (job as any)._id;
 		job.due = date;
 		job.state = 'pending';
-		const newJobId = collection.insert(job);
+		const newJobId = await collection.insertAsync(job);
 		log('Jobs', '    Jobs.replicate', jobId, config);
 		return newJobId;
 	}
 
-	export function reschedule(jobOrId: JobOrId, config: Partial<JobConfig>) {
+	export async function reschedule(jobOrId: JobOrId, config: Partial<JobConfig>) {
 		if (!jobOrId) {
 			console.warn('Jobs', '    Jobs.reschedule', 'JOB NOT FOUND', jobOrId);
 			return false;
@@ -334,24 +338,24 @@ export namespace Jobs {
 		if (config.priority) {
 			set.priority = config.priority;
 		}
-		const count = collection.update({_id: jobId}, {$set: set});
+		const count = await collection.updateAsync({_id: jobId}, {$set: set});
 		log('Jobs', '    Jobs.reschedule', jobId, config, date, count);
 		if (typeof config.callback == 'function') {
 			config.callback(count==0, count);
 		}
 	}
 
-	export function remove(jobOrId: JobOrId) {
+	export async function remove(jobOrId: JobOrId) {
 		if (!jobOrId) {
 			return false;
 		}
 		const jobId = typeof jobOrId == 'string' ? jobOrId : jobOrId._id;
-		var count = collection.remove({_id: jobId});
+		var count = await collection.removeAsync({_id: jobId});
 		log('Jobs', '    Jobs.remove', jobId, count);
 		return count > 0;
 	}
 
-	export function clear(state?: '*' | JobStatus | JobStatus[], jobName?: string, ...args: any[]) {
+	export async function clear(state?: '*' | JobStatus | JobStatus[], jobName?: string, ...args: any[]) {
 		const query: Mongo.Query<JobDocument> = {
 			state: state === "*" ? {$exists: true}
 				: typeof state === "string" ? state as JobStatus
@@ -368,40 +372,40 @@ export namespace Jobs {
 		const callback = args.length && typeof args[args.length - 1] == 'function' ? args.pop() : null;
 		args.forEach((arg, index) => query["arguments." + index] = arg);
 
-		const count = collection.remove(query);
+		const count = await collection.removeAsync(query);
 		log('Jobs', 'Jobs.clear', count, query);
 		callback?.(null, count);
 
 		return count;
 	}
 
-	export function findOne(jobName: string, ...args: any[]) {
+	export async function findOne(jobName: string, ...args: any[]) {
 		check(jobName, String);
 		const query: Mongo.Query<JobDocument> = {
 			name: jobName,
 		};
 		args.forEach((arg, index) => query["arguments." + index] = arg);
-		return collection.findOne(query);
+		return await collection.findOneAsync(query);
 	}
 
-	export function count(jobName: string, ...args: any[]) {
+	export async function count(jobName: string, ...args: any[]) {
 		check(jobName, String);
 		const query: Mongo.Query<JobDocument> = {
 			name: jobName,
 		};
 		args.forEach((arg, index) => query["arguments." + index] = arg);
-		const count = collection.find(query).count();
+		const count = await collection.find(query).countAsync();
 		return count;
 	};
 
-	export function countPending(jobName: string, ...args: any[]) {
+	export async function countPending(jobName: string, ...args: any[]) {
 		check(jobName, String);
 		const query: Mongo.Query<JobDocument>  = {
 			name: jobName,
 			state: 'pending',
 		};
 		args.forEach((arg, index) => query["arguments." + index] = arg);
-		const count = collection.find(query).count();
+		const count = await collection.find(query).countAsync();
 		return count;
 	}
 
@@ -458,7 +462,7 @@ namespace Queue {
 	var _executing = false;
 	var _awaitAsyncJobs = new Set<string>();
 
-	export function start() {
+	export async function start() {
 		if (_handle && _handle != PAUSED) {
 			stop(); // this also clears any existing job timeout
 		}
@@ -466,14 +470,14 @@ namespace Queue {
 		log('Jobs', 'queue.start paused:', pausedJobs);
 
 		// don't bother creating an observer if all jobs are paused
-		_handle = pausedJobs[0]=='*' ? PAUSED : Jobs.collection.find({
+		_handle = pausedJobs[0]=='*' ? PAUSED : await Jobs.collection.find({
 			state: "pending",
 			name: {$nin: pausedJobs},
 		}, {
 			limit: 1,
 			sort: {due: 1},
 			fields: {name: 1, due: 1},
-		}).observe({
+		}).observeAsync({
 			changed: (job) => _observer('changed', job),
 			added: (job) => _observer('added', job),
 		});
@@ -517,7 +521,7 @@ namespace Queue {
 		}
 	}
 
-	function _executeJobs() {
+	async function _executeJobs() {
 		// protect against observer/timeout race condition
 		if (_executing) {
 			console.warn('already executing!');
@@ -544,35 +548,36 @@ namespace Queue {
 				doneJobs = [];
 				do {
 					// always use the live version of dominator.lastPing.pausedJobs in case jobs are paused/restarted while executing
-					const lastPing = Dominator.collection.findOne({}, {fields: {pausedJobs: 1}})!;
-					job = Jobs.collection.findOne({
+					const lastPing = await Dominator.collection.findOneAsync({}, {fields: {pausedJobs: 1}});
+					const pausedJobs = lastPing?.pausedJobs || [];
+					job = await Jobs.collection.findOneAsync({
 						state: "pending",
 						due: {$lte: new Date()},
-						name: {$nin: doneJobs.concat(lastPing.pausedJobs, Array.from(_awaitAsyncJobs))}, // give other job types a chance...
+						name: {$nin: doneJobs.concat(pausedJobs, Array.from(_awaitAsyncJobs))}, // give other job types a chance...
 						_id: {$ne: lastJobId}, // protect against stale reads of the job we just executed
 					}, {sort: {due: 1, priority: -1}});
 					if (job) {
 						lastJobId = job._id;
-						executeJob(job);
+						await executeJob(job);
 						doneJobs.push(job.name); // don't do this job type again until we've tried other jobs.
 					}
-				} while (Dominator.lastPing!.pausedJobs.indexOf('*') == -1 && job);
-			} while (Dominator.lastPing!.pausedJobs.indexOf('*') == -1 && doneJobs.length);
+				} while ((Dominator.lastPing?.pausedJobs || []).indexOf('*') == -1 && job);
+			} while ((Dominator.lastPing?.pausedJobs || []).indexOf('*') == -1 && doneJobs.length);
 		} catch(e) {
 			console.warn('Jobs', 'executeJobs ERROR');
 			console.warn(e);
 		}
 
 		_executing = false;
-		start();
+		await start();
 	}
 
-	export function executeJob(job: Jobs.JobDocument) {
+	export async function executeJob(job: Jobs.JobDocument) {
 		log('Jobs', '  ' + job.name);
 
 		if (typeof Jobs.jobs[job.name] == 'undefined') {
 			console.warn('Jobs', 'job does not exist:', job.name);
-			setJobState(job._id, 'failure');
+			await setJobState(job._id, 'failure');
 			return;
 		}
 
@@ -580,36 +585,36 @@ namespace Queue {
 
 		const self: Jobs.JobThisType = {
 			document: job,
-			replicate: function(config) {
-				return Jobs.replicate(job._id, config);
+			replicate: async function(config) {
+				return await Jobs.replicate(job._id, config);
 			},
-			reschedule: function(config) {
+			reschedule: async function(config) {
 				action = 'reschedule';
-				Jobs.reschedule(job._id, config);
+				await Jobs.reschedule(job._id, config);
 			},
-			remove: function() {
+			remove: async function() {
 				action = 'remove';
-				return Jobs.remove(job._id);
+				return await Jobs.remove(job._id);
 			},
-			success: function() {
+			success: async function() {
 				action = 'success';
-				return setJobState(job._id, action);
+				return await setJobState(job._id, action);
 			},
-			failure: function() {
+			failure: async function() {
 				action = 'failure';
-				return setJobState(job._id, action);
+				return await setJobState(job._id, action);
 			},
 		};
 
-		function completed() {
+		async function completed() {
 			if (!action) {
 				if (settings.defaultCompletion == 'success') {
-					setJobState(job._id, 'success');
+					await setJobState(job._id, 'success');
 				} else if (settings.defaultCompletion == 'remove') {
-					Jobs.remove(job._id);
+					await Jobs.remove(job._id);
 				} else {
 					console.warn('Jobs', "Job was not resolved with success, failure, reschedule or remove. Consider using the 'defaultCompletion' option.", job);
-					setJobState(job._id, 'failure');
+					await setJobState(job._id, 'failure');
 				}
 			}
 		}
@@ -617,23 +622,23 @@ namespace Queue {
 		let isAsync = false;
 
 		try {
-			setJobState(job._id, 'executing');
+			await setJobState(job._id, 'executing');
 			const res = Jobs.jobs[job.name].apply(self, job.arguments);
 			if (res?.then) {
 				isAsync = true
 				if (job.awaitAsync) {
 					_awaitAsyncJobs.add(job.name);
 				}
-				res.then(() => {
+				res.then(async () => {
 					log('Jobs', '    Done async job', job.name, 'result:', action);
 					_awaitAsyncJobs.delete(job.name);
-					completed();
-				}).catch(e => {
+					await completed();
+				}).catch(async (e: any) => {
 					console.warn('Jobs', '    Error in async job', job);
 					console.warn(e);
 					_awaitAsyncJobs.delete(job.name);
 					if (action != 'reschedule') {
-						self.failure();
+						await self.failure();
 					}
 				});
 			} else {
@@ -643,17 +648,17 @@ namespace Queue {
 			console.warn('Jobs', 'Error in job', job);
 			console.warn(e);
 			if (action != 'reschedule') {
-				self.failure();
+				await self.failure();
 			}
 		}
 
 		if (!isAsync) {
-			completed();
+			await completed();
 		}
 	}
 
-	function setJobState(jobId: string, state: Jobs.JobStatus) {
-		const count = Jobs.collection.update({_id: jobId}, {$set: {state: state}});
+	async function setJobState(jobId: string, state: Jobs.JobStatus) {
+		const count = await Jobs.collection.updateAsync({_id: jobId}, {$set: {state: state}});
 		log('Jobs', 'setJobState', jobId, state, count);
 	}
 

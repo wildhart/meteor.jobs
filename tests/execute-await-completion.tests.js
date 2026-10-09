@@ -74,6 +74,19 @@ describe('Jobs.execute with awaitCompletion', function () {
 		assert.strictEqual((await doc(job._id)).state, 'failure');
 	});
 
+	it('reports the resolution applied by defaultCompletion, which null returns to the default', async () => {
+		Jobs.configure({ defaultCompletion: 'remove' });
+		try {
+			const removed = await Jobs.run('test.unresolved');
+			assert.strictEqual(await Jobs.execute(removed._id), 'remove');
+			assert.strictEqual(await doc(removed._id), undefined);
+		} finally {
+			Jobs.configure({ defaultCompletion: null });
+		}
+		const job = await Jobs.run('test.unresolved');
+		assert.strictEqual(await Jobs.execute(job._id), 'failure');
+	});
+
 	it('resolves to false for a missing or non-pending job', async () => {
 		assert.strictEqual(await Jobs.execute('no-such-job', { awaitCompletion: true }), false);
 		const job = await Jobs.run('test.quick', 'once');

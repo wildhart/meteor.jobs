@@ -211,7 +211,7 @@ export namespace Jobs {
 		log: typeof console.log | boolean;
 		autoStart: boolean;
 		setServerId?: string | Function;
-		defaultCompletion?: 'success' | 'remove';
+		defaultCompletion?: 'success' | 'remove' | null;
 		requeueOnTakeover: boolean;
 		maxExecutionTime: number;
 	}
@@ -279,7 +279,8 @@ export namespace Jobs {
 			setServerId: Match.Maybe(Match.OneOf(String, Function)),
 			log: Match.Maybe(Match.OneOf(undefined, null, Boolean, Function)),
 			autoStart: Match.Maybe(Boolean),
-			defaultCompletion: Match.Maybe(Match.Where((val => /^(success|remove)$/.test(val)))),
+			// null returns to the default (unset); check() validates an explicit undefined against the inner pattern, so allow null instead
+			defaultCompletion: Match.Maybe(Match.OneOf(null, Match.Where((val => /^(success|remove)$/.test(val))))),
 			startupDelay: Match.Maybe(Number),
 			requeueOnTakeover: Match.Maybe(Boolean),
 			maxExecutionTime: Match.Maybe(Number),
@@ -613,7 +614,8 @@ namespace Queue {
 
 		if (nextJob) {
 			// cap timeout limit to 24 hours to avoid Node.js limit https://github.com/wildhart/meteor.jobs/issues/5
-			let msTillNextJob = Math.min(MAX_TIMEOUT_MS, (nextJob.due.valueOf() - Date.now()) );
+			// and floor at 0: an overdue job would otherwise give Node a negative timeout (it warns and clamps to 1ms)
+			let msTillNextJob = Math.max(0, Math.min(MAX_TIMEOUT_MS, nextJob.due.valueOf() - Date.now()));
 
 			_timeout = nextJob && !_executing ? Meteor.setTimeout(()=> {
 				_timeout = null;

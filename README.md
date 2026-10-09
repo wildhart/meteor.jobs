@@ -293,8 +293,9 @@ Jobs.configure({
     autoStart: Boolean,
 
     // whether to mark successful just as successful, or remove them,
-    // otherwise you have to resolve every job with this.success() or this.remove()
-    defaultCompletion: 'success' | 'remove',
+    // otherwise you have to resolve every job with this.success() or this.remove().
+    // Pass null to return to the default.
+    defaultCompletion: 'success' | 'remove' | null,
 
     // requeue jobs left 'executing' whenever a server takes control of the queue (default = false).
     // Makes execution at-least-once, see "Crash recovery" below before enabling.
@@ -635,6 +636,26 @@ If any of these differences make this package unsuitable for you, please let me 
 - `Jobs.cancel()` doesn't exist. Just remove it with [Jobs.remove()](#jobsremove) - I don't see the point in keeping old jobs lying around.
 - [Jobs.clear()](#jobsclear) can take additional `argument` parameters to only delete jobs matching those arguments.
 - [Jobs.jobs](#jobsjobs) doesn't exist in msavin:sjobs
+
+------
+
+## Running the tests
+
+The package has a `meteor test-packages` suite in `tests/`. From the package directory, after `npm install` (dev dependencies only, nothing is shipped):
+
+```sh
+npm test            # run the suite once
+npm run test:watch  # keep the test app running and re-run on file changes
+npm run check       # type-check jobs.ts and TypedJob.ts with tsc
+```
+
+`npm test` runs:
+
+```sh
+TEST_CLIENT=0 meteor --release METEOR@3.5.2 test-packages ./ --port 3100 --once --driver-package meteortesting:mocha
+```
+
+`TEST_CLIENT=0` skips the client run, which has nothing to test (the script uses `cross-env` so this works in any shell; on Windows cmd by hand it is `set TEST_CLIENT=0 && meteor ...`). Keep `--port` whenever another Meteor app is running on the default ports: the test app would otherwise share that app's MongoDB on port 3001 and the two would pick up each other's jobs.
 
 ------
 

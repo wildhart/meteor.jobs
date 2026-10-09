@@ -393,6 +393,8 @@ The configuration object supports the following inputs:
 	- If a job is marked as singular, it will only be scheduled if no other job is **pending** with the same arguments
 * **`awaitAsync`** - Boolean
 	- If an [async job](#asyncjobs) with run with `awaitAsync: true` is running, then no other job of the same name will start until the running job has completed.
+* **`jobId`** - String
+	- Use your own `_id` for the job document instead of a generated one. This makes scheduling idempotent: if a job with that id already exists (in any state), `Jobs.run` logs `Job with this id already exists`, calls the `callback` with that error, and returns `false`, exactly like `unique` and `singular`. Useful when the id is derived from your own data (e.g. `"reminder-" + orderId`) so you can `Jobs.remove(id)` or `Jobs.reschedule(id, ...)` later without querying.
 - **`callback`** - Function
 	- Run a callback function after scheduling the job
 
@@ -609,6 +611,7 @@ If any of these differences make this package unsuitable for you, please let me 
 #### Unreleased
 - `Jobs.execute(job, {awaitCompletion: true})` waits for an async job function to finish before resolving
 - `Jobs.execute` resolves to how the job was resolved (`'success'`, `'failure'`, `'reschedule'`, `'remove'`), `'executing'` for an async job still running, or `false` if the job was not found or not pending
+- `Jobs.run` accepts a `jobId` config option to choose the job document's `_id`; a duplicate id returns `false` like `unique`/`singular`
 
 #### 2.0.0 (2026-08-10)
 - **BREAKING CHANGE**: Full migration to Meteor 3.0 async database operations

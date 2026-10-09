@@ -17,4 +17,5 @@ Package.onTest(function(api) {
 	api.use(['ecmascript', 'typescript', 'mongo', 'meteortesting:mocha@3.3.0', 'wildhart:jobs'], 'server');
 	api.mainModule('tests/jobs.tests.js', 'server');
 	api.addFiles('tests/execute-await-completion.tests.js', 'server');
+	api.addFiles('tests/custom-job-id.tests.js', 'server');
 });

@@ -19,4 +19,5 @@ Package.onTest(function(api) {
 	api.addFiles('tests/execute-await-completion.tests.js', 'server');
 	api.addFiles('tests/custom-job-id.tests.js', 'server');
 	api.addFiles('tests/retry-failed-jobs.tests.js', 'server');
+	api.addFiles('tests/recover-executing-jobs.tests.js', 'server');
 });

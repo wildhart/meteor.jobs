@@ -8,6 +8,8 @@ const settings: Jobs.Config = {
 	maxWait: 5 * 60 * 1000, // specify how long the server could be inactive before another server takes on the master role  (default=5 min)
 	log: console.log,
 	autoStart: true,
+	requeueOnTakeover: false, // requeue jobs left 'executing' whenever this server takes control of the queue (see README "Crash recovery")
+	maxExecutionTime: 0, // (ms) requeue jobs which have been 'executing' longer than this, checked on every ping; 0 = off
 };
 
 function log(...args: any) {
@@ -162,6 +164,11 @@ namespace Dominator {
 	async function _takeControl(reason: string) {
 		log('Jobs', 'takeControl', reason);
 		await _ping();
+		if (settings.requeueOnTakeover) {
+			// only the server in control executes jobs, so anything still 'executing' now was normally
+			// started by a server which has since died or restarted. Opt-in: it makes execution at-least-once.
+			await Jobs.requeueExecuting();
+		}
 		await Queue.start();
 	}
 
@@ -188,6 +195,9 @@ namespace Dominator {
 		}
 		await collection.upsertAsync({_id: DOMINATOR_ID}, newPing);
 		log('Jobs', 'ping', newPing.date, 'paused:', newPing.pausedJobs);
+		if (settings.maxExecutionTime > 0) {
+			await Jobs.requeueExecuting(new Date(Date.now() - settings.maxExecutionTime));
+		}
 	}
 }
 
@@ -202,6 +212,8 @@ export namespace Jobs {
 		autoStart: boolean;
 		setServerId?: string | Function;
 		defaultCompletion?: 'success' | 'remove';
+		requeueOnTakeover: boolean;
+		maxExecutionTime: number;
 	}
 
 	export interface JobConfig {
@@ -233,6 +245,7 @@ export namespace Jobs {
 		attempts?: number,
 		retries?: number,
 		retryIn?: any,
+		startedAt?: Date,
 	}
 
 	export interface JobThisType {
@@ -255,6 +268,9 @@ export namespace Jobs {
 	// Create index - will be called from startup
 	export async function createIndexes() {
 		await collection.createIndexAsync({name: 1, due: 1, state: 1});
+		// for requeueExecuting(), which otherwise scans the whole collection on every ping when maxExecutionTime is set.
+		// Partial, so it only holds the (few) executing jobs.
+		await collection.createIndexAsync({state: 1, startedAt: 1}, {partialFilterExpression: {state: 'executing'}});
 	}
 
 	export function configure(config: Partial<Config>) {
@@ -265,6 +281,8 @@ export namespace Jobs {
 			autoStart: Match.Maybe(Boolean),
 			defaultCompletion: Match.Maybe(Match.Where((val => /^(success|remove)$/.test(val)))),
 			startupDelay: Match.Maybe(Number),
+			requeueOnTakeover: Match.Maybe(Boolean),
+			maxExecutionTime: Match.Maybe(Number),
 		});
 		Object.assign(settings, config);
 		if (settings.log === true) {
@@ -400,6 +418,7 @@ export namespace Jobs {
 
 		delete (job as any)._id;
 		delete job.attempts; // the copy keeps `retries`/`retryIn` but starts its own run cycle
+		delete job.startedAt;
 		job.due = date;
 		job.state = 'pending';
 		const newJobId = await collection.insertAsync(job);
@@ -496,6 +515,40 @@ export namespace Jobs {
 
 	function isDuplicateKeyError(e: any) {
 		return e?.code == 11000 || /duplicate key/i.test(e?.message || '');
+	}
+
+	/**
+	 * Return 'executing' jobs to 'pending' so they run again. Called automatically when a server takes
+	 * control of the queue if `requeueOnTakeover` is set (the previous server died or restarted mid-job)
+	 * and, when `maxExecutionTime` is configured, on every ping for jobs started before `olderThan`.
+	 * Jobs are rerun from scratch, so job functions should be safe to run more than once.
+	 * A job with `retries` which has already used all its attempts (it crashed the server on its last
+	 * allowed run) is marked 'failure' instead, so a job which keeps crashing the server does not loop forever.
+	 */
+	export async function requeueExecuting(olderThan?: Date) {
+		const query: Mongo.Query<JobDocument> = {state: 'executing'};
+		if (olderThan) {
+			query.startedAt = {$lte: olderThan};
+		}
+		const failed = await collection.updateAsync({
+			...query,
+			retries: {$exists: true},
+			$expr: {$gt: ['$attempts', '$retries']},
+		} as any, {
+			$set: {state: 'failure'},
+			$unset: {startedAt: ''},
+		}, {multi: true});
+		if (failed) {
+			log('Jobs', 'requeueExecuting', 'marked failed, no attempts left:', failed);
+		}
+		const count = await collection.updateAsync(query, {
+			$set: {state: 'pending'},
+			$unset: {startedAt: ''},
+		}, {multi: true});
+		if (count) {
+			log('Jobs', 'requeueExecuting', count, olderThan || 'all');
+		}
+		return count;
 	}
 }
 
@@ -695,7 +748,7 @@ namespace Queue {
 
 		try {
 			// `attempts` counts the runs of the current scheduling of the job (reset by Jobs.reschedule)
-			await Jobs.collection.updateAsync({_id: job._id}, {$set: {state: 'executing'}, $inc: {attempts: 1}});
+			await Jobs.collection.updateAsync({_id: job._id}, {$set: {state: 'executing', startedAt: new Date()}, $inc: {attempts: 1}});
 			job.attempts = (job.attempts || 0) + 1;
 			const res: any = Jobs.jobs[job.name].apply(self, job.arguments);
 			if (res?.then) {

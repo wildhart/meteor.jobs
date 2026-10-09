@@ -11,6 +11,7 @@ declare module 'meteor/wildhart:jobs' {
             autoStart: boolean;
             setServerId?: string | Function;
             defaultCompletion?: 'success' | 'remove';
+            requeueOnTakeover: boolean;
             maxExecutionTime: number;
         }
 

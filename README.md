@@ -296,9 +296,12 @@ Jobs.configure({
     // otherwise you have to resolve every job with this.success() or this.remove()
     defaultCompletion: 'success' | 'remove',
 
+    // requeue jobs left 'executing' whenever a server takes control of the queue (default = false).
+    // Makes execution at-least-once, see "Crash recovery" below before enabling.
+    requeueOnTakeover: Boolean,
+
     // (milliseconds) requeue jobs which have been 'executing' for longer than this,
-    // checked on every ping. 0 (default) only requeues when a server takes control.
-    // See "Crash recovery" below.
+    // checked on every ping. 0 (default) = off. See "Crash recovery" below.
     maxExecutionTime: Number,
 })
 ```
@@ -590,17 +593,19 @@ This defers the error message `'Job was not resolved with success, failure, resc
 
 ## Crash recovery
 
-A job is marked `'executing'` (with a `startedAt` date) just before its function runs. If the server in control of the queue crashes, is killed, or restarts while jobs are executing, those jobs would otherwise stay `'executing'` forever and never run again.
+A job is marked `'executing'` (with a `startedAt` date) just before its function runs. If the server in control of the queue crashes, is killed, or restarts while jobs are executing, those jobs stay `'executing'` forever and never run again. By default the package does nothing about this: a lost job is lost, and no job ever runs twice (at-most-once).
 
-Since only one server executes jobs, the package now assumes that any job still `'executing'` when a server takes control of the queue was started by a server which is gone, and returns it to `'pending'` so it runs again straight away. This happens on a fresh start, on a restart of the server in control (`setServerId` static), and when another server takes over after `maxWait`.
+Two opt-in settings in [`Jobs.configure`](#jobsconfigure) change that trade-off to at-least-once:
 
-Two things to keep in mind:
-* A job which is requeued runs its function **again from the start**, so job functions should be safe to run more than once (make them idempotent, or check your own data before acting). This also covers the rare case where the old server was only stalled, not dead, and finishes its copy of the job after the takeover.
-* Jobs started with `Jobs.execute()` on a server which is **not** in control are also `'executing'` and would be requeued by a takeover while they run.
+* **`requeueOnTakeover: true`** - whenever a server takes control of the queue (a fresh start, a restart of the server in control with a static `setServerId`, or a takeover after `maxWait`), every job still `'executing'` is returned to `'pending'` and runs again straight away. Since only the server in control executes jobs, such a job was normally started by a server which is gone.
+* **`maxExecutionTime`** (milliseconds) - on every ping, the server in control requeues jobs which started more than this long ago. This covers a job function which hangs (for example on a network call with no timeout) while its server stays alive. Keep it comfortably longer than your longest job.
 
-If a job function can hang (for example on a network call with no timeout) while the server stays alive, set `maxExecutionTime`; on every ping the server in control requeues jobs which started more than that long ago. Keep it comfortably longer than your longest job.
+Before enabling either, make sure your job functions are safe to run more than once (idempotent, or checking your own data before acting). A requeued job runs its function **again from the start**, and the first run may have partly or fully completed:
+* The old server may have been stalled rather than dead (a long GC pause, a database outage longer than `maxWait`, a synchronous job blocking the event loop) and will finish its copy of the job after the takeover.
+* Jobs started with `Jobs.execute()` on a server which is **not** in control are also `'executing'` and are requeued by a takeover while they run.
+* A job which crashes the server itself (an uncaught exception outside the job's promise, running out of memory) is requeued on every restart and crashes the server again. Give such jobs a `retries` value: a requeued run counts as an attempt, and a job which has used all of its attempts is marked `'failure'` instead of being requeued, so the loop ends.
 
-You can also call `Jobs.requeueExecuting()` yourself, optionally with a `Date` to only requeue jobs started before it. It returns the number of jobs requeued.
+You can also call `Jobs.requeueExecuting()` yourself, optionally with a `Date` to only requeue jobs started before it. It returns the number of jobs requeued. A single-server deployment can, for example, call it once from `Meteor.startup()` instead of enabling `requeueOnTakeover`.
 
 ## Bulk Operations
 
@@ -640,7 +645,7 @@ If any of these differences make this package unsuitable for you, please let me 
 - `Jobs.execute` resolves to how the job was resolved (`'success'`, `'failure'`, `'reschedule'`, `'remove'`), `'executing'` for an async job still running, or `false` if the job was not found or not pending
 - `Jobs.run` accepts a `jobId` config option to choose the job document's `_id`; a duplicate id returns `false` like `unique`/`singular`. A trailing argument object containing a `jobId` key is now recognised as the config object
 - `Jobs.run` accepts `retries` and `retryIn` to rerun a job whose function throws. All job documents now record `attempts` (runs of the current scheduling, reset by a reschedule). A trailing argument object containing a `retries` or `retryIn` key is now recognised as the config object
-- Jobs left `'executing'` by a crashed or restarted server are requeued when a server takes control; `startedAt` is recorded on executing jobs; new `maxExecutionTime` option and `Jobs.requeueExecuting()` (see "Crash recovery")
+- Crash recovery (opt-in, see "Crash recovery"): `requeueOnTakeover` requeues jobs left `'executing'` by a crashed or restarted server when a server takes control; `maxExecutionTime` requeues jobs executing for too long; `Jobs.requeueExecuting()` does the same on demand. All executing jobs now record `startedAt`
 
 #### 2.0.0 (2026-08-10)
 - **BREAKING CHANGE**: Full migration to Meteor 3.0 async database operations

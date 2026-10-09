@@ -40,6 +40,7 @@ declare module 'meteor/wildhart:jobs' {
             awaitAsync: boolean;
             unique: boolean;
             singular: boolean;
+            jobId: string;
             callback?: Function;
         }
 

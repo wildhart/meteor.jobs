@@ -174,6 +174,7 @@ export namespace Jobs {
 		awaitAsync: boolean;
 		unique: boolean;
 		singular: boolean;
+		jobId: string;
 		callback?: Function;
 	}
 
@@ -234,7 +235,7 @@ export namespace Jobs {
 		// log('Jobs', 'Jobs.register', Object.keys(jobs).length, Object.keys(newJobs).join(', '));
 	}
 
-	const configItems: Array<keyof JobConfig> = ['in', 'on', 'priority', 'date', 'callback', 'singular', 'unique', 'awaitAsync']
+	const configItems: Array<keyof JobConfig> = ['in', 'on', 'priority', 'date', 'callback', 'singular', 'unique', 'awaitAsync', 'jobId']
 
 	const isConfig = (input: any) => !!(input && typeof input == 'object' && configItems.some(i => typeof input[i] != 'undefined'));
 
@@ -246,6 +247,10 @@ export namespace Jobs {
 		if (config && !isConfig(config)) {
 			args.push(config);
 			config = null;
+		}
+		if (config?.jobId !== undefined) {
+			// validate before the unique/singular queries below so a bad id fails fast
+			check(config.jobId, Match.Where((id: any) => typeof id == 'string' && id.length > 0));
 		}
 		var error;
 		if (config?.unique) { // If a job is marked as unique, it will only be scheduled if no other job exists with the same arguments
@@ -270,7 +275,24 @@ export namespace Jobs {
 			created: new Date(),
 			awaitAsync: config?.awaitAsync || undefined,
 		};
-		const jobId = await collection.insertAsync(jobDoc);
+		if (config?.jobId !== undefined) {
+			// caller-chosen id, so a job can be enqueued idempotently and looked up without a query
+			jobDoc._id = config.jobId;
+		}
+		let jobId: string | undefined;
+		try {
+			jobId = await collection.insertAsync(jobDoc);
+		} catch (e: any) {
+			if (config?.jobId && isDuplicateKeyError(e)) {
+				error = 'Job with this id already exists';
+				log('Jobs', '  ' + error, config.jobId);
+				if (typeof config?.callback == 'function') {
+					config.callback(error, null);
+				}
+				return false;
+			}
+			throw e;
+		}
 		if (jobId) {
 			jobDoc._id = jobId;
 		} else {
@@ -419,6 +441,10 @@ export namespace Jobs {
 
 	export const start = Dominator.start;
 	export const stop = Dominator.stop;
+
+	function isDuplicateKeyError(e: any) {
+		return e?.code == 11000 || /duplicate key/i.test(e?.message || '');
+	}
 
 	function getDateFromConfig(config: Partial<Jobs.JobConfig>) {
 		// https://github.com/msavin/SteveJobs..meteor.jobs.scheduler.queue.background.tasks/blob/031fdf5051b2f2581a47f64ab5b54ffbb6893cf8/package/server/imports/utilities/helpers/date.js

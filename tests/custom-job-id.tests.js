@@ -47,7 +47,11 @@ describe('Jobs.run with jobId', function () {
 		assert.ok(job._id.length >= 17);
 	});
 
-	it('rejects a non-string jobId', async () => {
+	it('rejects a non-string or empty jobId before checking unique/singular', async () => {
 		await assert.rejects(Jobs.run('test.customId', { jobId: 42 }), /Match error/);
+		await assert.rejects(Jobs.run('test.customId', { jobId: '' }), /Match error/);
+		// validation happens before the unique query, so the duplicate is never looked up
+		await Jobs.run('test.customId', 'dup', { unique: true });
+		await assert.rejects(Jobs.run('test.customId', 'dup', { unique: true, jobId: 42 }), /Match error/);
 	});
 });

@@ -248,15 +248,16 @@ export namespace Jobs {
 			args.push(config);
 			config = null;
 		}
+		if (config?.jobId !== undefined) {
+			// validate before the unique/singular queries below so a bad id fails fast
+			check(config.jobId, Match.Where((id: any) => typeof id == 'string' && id.length > 0));
+		}
 		var error;
 		if (config?.unique) { // If a job is marked as unique, it will only be scheduled if no other job exists with the same arguments
 			if (await count(name, ...args)) error = "Unique job already exists";
 		}
 		if (config?.singular) { // If a job is marked as singular, it will only be scheduled if no other job is PENDING with the same arguments
 			if (await countPending(name, ...args)) error = 'Singular job already exists';
-		}
-		if (config?.jobId !== undefined) {
-			check(config.jobId, String);
 		}
 		if (error) {
 			log('Jobs', '  ' + error);
@@ -274,7 +275,7 @@ export namespace Jobs {
 			created: new Date(),
 			awaitAsync: config?.awaitAsync || undefined,
 		};
-		if (config?.jobId) {
+		if (config?.jobId !== undefined) {
 			// caller-chosen id, so a job can be enqueued idempotently and looked up without a query
 			jobDoc._id = config.jobId;
 		}

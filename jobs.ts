@@ -175,6 +175,8 @@ export namespace Jobs {
 		unique: boolean;
 		singular: boolean;
 		jobId: string;
+		retries: number;
+		retryIn: any;
 		callback?: Function;
 	}
 
@@ -189,6 +191,9 @@ export namespace Jobs {
 		priority: number,
 		created: Date,
 		awaitAsync?: boolean,
+		attempts?: number,
+		retries?: number,
+		retryIn?: any,
 	}
 
 	export interface JobThisType {
@@ -235,7 +240,7 @@ export namespace Jobs {
 		// log('Jobs', 'Jobs.register', Object.keys(jobs).length, Object.keys(newJobs).join(', '));
 	}
 
-	const configItems: Array<keyof JobConfig> = ['in', 'on', 'priority', 'date', 'callback', 'singular', 'unique', 'awaitAsync', 'jobId']
+	const configItems: Array<keyof JobConfig> = ['in', 'on', 'priority', 'date', 'callback', 'singular', 'unique', 'awaitAsync', 'jobId', 'retries', 'retryIn']
 
 	const isConfig = (input: any) => !!(input && typeof input == 'object' && configItems.some(i => typeof input[i] != 'undefined'));
 
@@ -274,7 +279,13 @@ export namespace Jobs {
 			priority: config?.priority || 0,
 			created: new Date(),
 			awaitAsync: config?.awaitAsync || undefined,
+			retries: config?.retries || undefined,
+			retryIn: config?.retries && config.retryIn || undefined,
 		};
+		if (jobDoc.retries !== undefined) {
+			check(jobDoc.retries, Number);
+			check(jobDoc.retryIn, Match.Maybe(Object));
+		}
 		if (config?.jobId !== undefined) {
 			// caller-chosen id, so a job can be enqueued idempotently and looked up without a query
 			jobDoc._id = config.jobId;
@@ -658,12 +669,27 @@ namespace Queue {
 			return action;
 		}
 
+		// retry a job which threw (or rejected) if it has retries left, otherwise mark it failed
+		async function failed() {
+			if (action == 'reschedule') {
+				return;
+			}
+			const attempts = job.attempts || 0;
+			if (job.retries && attempts <= job.retries) {
+				log('Jobs', '    retrying', job.name, 'attempt', attempts, 'of', job.retries + 1);
+				await self.reschedule({in: job.retryIn || {}});
+			} else {
+				await self.failure();
+			}
+		}
+
 		// set for an async job function: settles once it has finished and its state is resolved;
 		// the queue does not wait for it (async jobs run concurrently) but Jobs.execute can.
 		let completion: Promise<Jobs.ExecuteResult> | null = null;
 
 		try {
-			await setJobState(job._id, 'executing');
+			await Jobs.collection.updateAsync({_id: job._id}, {$set: {state: 'executing'}, $inc: {attempts: 1}});
+			job.attempts = (job.attempts || 0) + 1;
 			const res: any = Jobs.jobs[job.name].apply(self, job.arguments);
 			if (res?.then) {
 				if (job.awaitAsync) {
@@ -677,9 +703,7 @@ namespace Queue {
 					console.warn('Jobs', '    Error in async job', job);
 					console.warn(e);
 					_awaitAsyncJobs.delete(job.name);
-					if (action != 'reschedule') {
-						await self.failure();
-					}
+					await failed();
 					return action ?? 'failure';
 				});
 			} else {
@@ -688,9 +712,7 @@ namespace Queue {
 		} catch(e) {
 			console.warn('Jobs', 'Error in job', job);
 			console.warn(e);
-			if (action != 'reschedule') {
-				await self.failure();
-			}
+			await failed();
 		}
 
 		return !completion ? await completed()

@@ -250,7 +250,7 @@ if (Meteor.isServer) {
 
 ## Traditional API Documentation
 
-`Jobs.register` and `Jobs.run` are all you need to get started, but that's only the beginning of what the package can do. To explore the rest of the functionality, jump into the documentation:
+`Jobs.register()` and `Jobs.run()` are all you need to get started, but that's only the beginning of what the package can do. To explore the rest of the functionality, jump into the documentation:
 
  - [Jobs.configure](#jobsconfigure)
  - [Jobs.register](#jobsregister)
@@ -271,7 +271,7 @@ if (Meteor.isServer) {
 
 ### Jobs.configure
 
-`Jobs.configure` allows you to configure how the package should work. You can configure one option or all of them. Defaults are shown in the code below:
+`Jobs.configure()` allows you to configure how the package should work. You can configure one option or all of them. Defaults are shown in the code below:
 
 ```javascript
 Jobs.configure({
@@ -310,7 +310,7 @@ Jobs.configure({
 
 ### Jobs.register
 
-`Jobs.register` allows you to register a function for a job.
+`Jobs.register()` allows you to register a function for a job.
 
 ```typescript
 Jobs.register({
@@ -359,7 +359,7 @@ See [Repeating Jobs](#repeating-jobs) and [Async Jobs/Promises](#async-jobs)
 
 ### Jobs.run
 
-`Jobs.run` allows you to schedule a job to run. You call it just like you would call a method, by specifying the job name and its arguments. At the end, you can pass in a special configuration object. Otherwise, it will be scheduled to run as soon as possible.
+`Jobs.run()` allows you to schedule a job to run. You call it just like you would call a method, by specifying the job name and its arguments. At the end, you can pass in a special configuration object. Otherwise, it will be scheduled to run as soon as possible.
 
 ```javascript
 var jobDoc = Jobs.run("sendReminder", "jon@example.com", "The future is here!", {
@@ -377,7 +377,7 @@ var jobDoc = Jobs.run("sendReminder", "jon@example.com", "The future is here!", 
 // or NEW API:
 sendReminderJob.withArgs("jon@example.com", "The future is here!").run(...);
 ```
-`Jobs.run` returns a `jobDoc`.
+`Jobs.run()` returns a `jobDoc`.
 
 The configuration object supports the following inputs:
 
@@ -403,21 +403,21 @@ The configuration object supports the following inputs:
 * **`awaitAsync`** - Boolean
 	- If an [async job](#asyncjobs) with run with `awaitAsync: true` is running, then no other job of the same name will start until the running job has completed.
 * **`jobId`** - String
-	- Use your own `_id` for the job document instead of a generated one. This makes scheduling idempotent: if a job with that id already exists (in any state), `Jobs.run` logs `Job with this id already exists`, calls the `callback` with that error, and returns `false`, exactly like `unique` and `singular`. Useful when the id is derived from your own data (e.g. `"reminder-" + orderId`) so you can `Jobs.remove(id)` or `Jobs.reschedule(id, ...)` later without querying.
-	- "In any state" includes finished jobs: a job resolved with `this.success()` (or `defaultCompletion: 'success'`) keeps its id occupied until it is removed, so pair `jobId` with `this.remove()` or `defaultCompletion: 'remove'` if you want to schedule the same id again later. `Jobs.replicate` of a job with a custom id gives the copy a generated id.
+	- Use your own `_id` for the job document instead of a generated one. This makes scheduling idempotent: if a job with that id already exists (in any state), `Jobs.run()` logs `Job with this id already exists`, calls the `callback` with that error, and returns `false`, exactly like `unique` and `singular`. Useful when the id is derived from your own data (e.g. `"reminder-" + orderId`) so you can `Jobs.remove(id)` or `Jobs.reschedule(id, ...)` later without querying.
+	- "In any state" includes finished jobs: a job resolved with `this.success()` (or `defaultCompletion: 'success'`) keeps its id occupied until it is removed, so pair `jobId` with `this.remove()` or `defaultCompletion: 'remove'` if you want to schedule the same id again later. `Jobs.replicate()` of a job with a custom id gives the copy a generated id.
 	- Must be a non-empty string. Note that a trailing argument object which happens to contain a `jobId` key is now treated as the configuration object, as with every other configuration key.
 * **`retries`** - Number
 	- How many times to run the job again if its function throws (or its promise rejects). The default is 0: the job is marked `'failure'` on the first error. With `retries: 2` the job runs up to 3 times. An explicit `this.failure()` is never retried. Must be a non-negative integer.
 * **`retryIn`** - Object
 	- How long to wait before each retry, in the same format as `in` (e.g. `{minutes: 5}`). The default is to retry as soon as possible.
 	- The job document records how many times the current scheduling of the job has run in `attempts`, also available in the job function as `this.document.attempts`. `attempts` is recorded for every job, not only those with `retries`.
-	- Rescheduling a job with `this.reschedule()` or `Jobs.reschedule()` starts a new run cycle and resets `attempts`, so a [repeating job](#repeating-jobs) gets its full `retries` on every run. `Jobs.replicate` copies `retries` and `retryIn` to the new job but not `attempts`.
+	- Rescheduling a job with `this.reschedule()` or `Jobs.reschedule()` starts a new run cycle and resets `attempts`, so a [repeating job](#repeating-jobs) gets its full `retries` on every run. `Jobs.replicate()` copies `retries` and `retryIn` to the new job but not `attempts`.
 - **`callback`** - Function
 	- Run a callback function after scheduling the job
 
 ### Jobs.execute
 
-`Jobs.execute` allows you to run a job ahead of its due date. It can only work on jobs that have not been resolved.
+`Jobs.execute()` allows you to run a job ahead of its due date. It can only work on jobs that have not been resolved.
 
 ```javascript
 Jobs.execute(doc) // or (doc._id)
@@ -440,7 +440,7 @@ if (result == 'failure') { /* ... */ }
 
 ### Jobs.reschedule
 
-`Jobs.reschedule` allows you to reschedule a job. It can only work on jobs that have not been resolved.
+`Jobs.reschedule()` allows you to reschedule a job. It can only work on jobs that have not been resolved.
 
 ```javascript
 Jobs.reschedule(job, { // or (job._id)
@@ -453,11 +453,11 @@ Jobs.reschedule(job, { // or (job._id)
 sendReminderJob.execute(job, {...}); // or (job._id, {...});
 ```
 
-The configuration is passed in as the second argument, and it supports the same inputs as `Jobs.run`.
+The configuration is passed in as the second argument, and it supports the same inputs as `Jobs.run()`.
 
 ### Jobs.replicate
 
-`Jobs.replicate` allows you to replicate a job.
+`Jobs.replicate()` allows you to replicate a job.
 
 ```javascript
 var jobId = Jobs.replicate(job, { // or (job._id, {...
@@ -469,11 +469,11 @@ var jobId = Jobs.replicate(job, { // or (job._id, {...
 sendReminderJob.execute(job, {...}); // or (job._id, {...});
 ```
 
-`Jobs.replicate` returns a `jobId`.
+`Jobs.replicate()` returns a `jobId`.
 
 ### Jobs.start
 
-`Jobs.start` allows you start all the queues. This runs automatically unless `autoStart` is set to `false`. If you call the function with no arguments, it will start all the queues. If you pass in a String, it will start a queue with that name. If you pass in an Array, it will start all the queues named in the array.
+`Jobs.start()` allows you start all the queues. This runs automatically unless `autoStart` is set to `false`. If you call the function with no arguments, it will start all the queues. If you pass in a String, it will start a queue with that name. If you pass in an Array, it will start all the queues named in the array.
 
 ```javascript
 // Start all the queues
@@ -492,7 +492,7 @@ Unlike msavin:sjobs, this function can be called on any server and whichever ser
 
 ### Jobs.stop
 
-`Jobs.stop` allows you stop all the queues. If you call the function with no arguments, it will stop all the queues. If you pass in a String, it will stop a queue with that name. If you pass in an Array, it will stop all the queues named in the array.
+`Jobs.stop()` allows you stop all the queues. If you call the function with no arguments, it will stop all the queues. If you pass in a String, it will stop a queue with that name. If you pass in an Array, it will stop all the queues named in the array.
 
 ```javascript
 // Stop all the queues
@@ -516,7 +516,7 @@ The in-control server should observe the change and stop instantly. Use `{$unset
 
 ### Jobs.clear
 
-`Jobs.clear` allows you to clear all or some of the jobs in your database.
+`Jobs.clear()` allows you to clear all or some of the jobs in your database.
 ```javascript
 var count = Jobs.clear(state, jobName, ...arguments, callback);
 e.g:
@@ -534,7 +534,7 @@ Parameters:
 
 ### Jobs.remove
 
-`Jobs.remove` allows you to remove a job from the collection.
+`Jobs.remove()` allows you to remove a job from the collection.
 
 ```javascript
 var success = Jobs.remove(doc); // or (doc._id)
@@ -596,7 +596,7 @@ This defers the error message `'Job was not resolved with success, failure, resc
 
 A job is marked `'executing'` (with a `startedAt` date) just before its function runs. If the server in control of the queue crashes, is killed, or restarts while jobs are executing, those jobs stay `'executing'` forever and never run again. By default the package does nothing about this: a lost job is lost, and no job ever runs twice (at-most-once).
 
-Two opt-in settings in [`Jobs.configure`](#jobsconfigure) change that trade-off to at-least-once:
+Two opt-in settings in [`Jobs.configure()`](#jobsconfigure) change that trade-off to at-least-once:
 
 * **`requeueOnTakeover: true`** - whenever a server takes control of the queue (a fresh start, a restart of the server in control with a static `setServerId`, or a takeover after `maxWait`), every job still `'executing'` is returned to `'pending'` and runs again straight away. Since only the server in control executes jobs, such a job was normally started by a server which is gone.
 * **`maxExecutionTime`** (milliseconds) - on every ping, the server in control requeues jobs which started more than this long ago. This covers a job function which hangs (for example on a network call with no timeout) while its server stays alive. Keep it comfortably longer than your longest job.
@@ -661,12 +661,18 @@ TEST_CLIENT=0 meteor --release METEOR@3.5.2 test-packages ./ --port 3100 --once 
 
 ## Version History
 
-#### Unreleased
+#### 2.1.0 (2026-10-10)
+All new behaviour is opt-in; existing apps upgrade without change. Thanks to [@harryadel](https://github.com/harryadel) for the features and the test suite.
 - `Jobs.execute(job, {awaitCompletion: true})` waits for an async job function to finish before resolving
-- `Jobs.execute` resolves to how the job was resolved (`'success'`, `'failure'`, `'reschedule'`, `'remove'`), `'executing'` for an async job still running, or `false` if the job was not found or not pending
-- `Jobs.run` accepts a `jobId` config option to choose the job document's `_id`; a duplicate id returns `false` like `unique`/`singular`. A trailing argument object containing a `jobId` key is now recognised as the config object
-- `Jobs.run` accepts `retries` and `retryIn` to rerun a job whose function throws. All job documents now record `attempts` (runs of the current scheduling, reset by a reschedule). A trailing argument object containing a `retries` or `retryIn` key is now recognised as the config object
-- Crash recovery (opt-in, see "Crash recovery"): `requeueOnTakeover` requeues jobs left `'executing'` by a crashed or restarted server when a server takes control; `maxExecutionTime` requeues jobs executing for too long; `Jobs.requeueExecuting()` does the same on demand. All executing jobs now record `startedAt`
+- `Jobs.execute()` resolves to how the job was resolved (`'success'`, `'failure'`, `'reschedule'`, `'remove'`), `'executing'` for an async job still running, or `false` if the job was not found or not pending
+- `Jobs.run()` accepts a `jobId` config option to choose the job document's `_id`; a duplicate id returns `false` like `unique`/`singular`
+- `Jobs.run()` accepts `retries` and `retryIn` to rerun a job whose function throws. Rescheduling a job starts a new run cycle, so repeating jobs get their full `retries` each time
+- Crash recovery (opt-in, see "Crash recovery"): `requeueOnTakeover` requeues jobs left `'executing'` by a crashed or restarted server when a server takes control; `maxExecutionTime` requeues jobs executing for too long; `Jobs.requeueExecuting()` does the same on demand
+- New job document fields: `attempts` on every job (runs of the current scheduling, reset by a reschedule) and `startedAt` while a job is executing
+- Note: a trailing argument object containing a `jobId`, `retries` or `retryIn` key is now recognised as the config object, as with every other config key
+- `Jobs.configure({defaultCompletion: null})` returns to the default
+- Fixed: an overdue job produced a negative timer value (Node warned and clamped it to 1 ms)
+- Package test suite (`npm test`, see "Running the tests") and JSDoc on the public types
 
 #### 2.0.0 (2026-08-10)
 - **BREAKING CHANGE**: Full migration to Meteor 3.0 async database operations

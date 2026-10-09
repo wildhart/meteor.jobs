@@ -41,6 +41,8 @@ declare module 'meteor/wildhart:jobs' {
             unique: boolean;
             singular: boolean;
             jobId: string;
+            retries: number;
+            retryIn: JobInConfig;
             callback?: Function;
         }
 
@@ -62,6 +64,9 @@ declare module 'meteor/wildhart:jobs' {
             priority: number,
             created: Date,
             awaitAsync?: boolean,
+            attempts?: number,
+            retries?: number,
+            retryIn?: JobInConfig,
         }
 
         interface JobThisType {

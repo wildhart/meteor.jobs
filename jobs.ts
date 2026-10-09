@@ -283,7 +283,12 @@ export namespace Jobs {
 		return error ? false : jobDoc as JobDocument;
 	}
 
-	export async function execute(jobOrId: JobOrId) {
+	export interface ExecuteOptions {
+		// resolve only once the job function has finished, including async job functions
+		awaitCompletion?: boolean;
+	}
+
+	export async function execute(jobOrId: JobOrId, options?: ExecuteOptions) {
 		if (!jobOrId) {
 			console.warn('Jobs', '    Jobs.execute', 'JOB NOT FOUND', jobOrId);
 			return false;
@@ -301,7 +306,7 @@ export namespace Jobs {
 			return;
 		}
 
-		await Queue.executeJob(job);
+		await Queue.executeJob(job, !!options?.awaitCompletion);
 	}
 
 	export async function replicate(jobOrId: JobOrId, config: Partial<JobConfig>) {
@@ -572,7 +577,7 @@ namespace Queue {
 		await start();
 	}
 
-	export async function executeJob(job: Jobs.JobDocument) {
+	export async function executeJob(job: Jobs.JobDocument, awaitCompletion = false) {
 		log('Jobs', '  ' + job.name);
 
 		if (typeof Jobs.jobs[job.name] == 'undefined') {
@@ -620,6 +625,9 @@ namespace Queue {
 		}
 
 		let isAsync = false;
+		// settles once the job function has finished and its state is resolved;
+		// the queue does not wait for it (async jobs run concurrently) but Jobs.execute can.
+		let completion: Promise<void> = Promise.resolve();
 
 		try {
 			await setJobState(job._id, 'executing');
@@ -629,7 +637,7 @@ namespace Queue {
 				if (job.awaitAsync) {
 					_awaitAsyncJobs.add(job.name);
 				}
-				res.then(async () => {
+				completion = res.then(async () => {
 					log('Jobs', '    Done async job', job.name, 'result:', action);
 					_awaitAsyncJobs.delete(job.name);
 					await completed();
@@ -654,6 +662,8 @@ namespace Queue {
 
 		if (!isAsync) {
 			await completed();
+		} else if (awaitCompletion) {
+			await completion;
 		}
 	}
 

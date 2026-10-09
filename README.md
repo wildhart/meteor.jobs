@@ -406,6 +406,12 @@ Jobs.execute(doc) // or (doc._id)
 sendReminderJob.execute(doc); // or (doc._id)
 ```
 
+For an [async job](#async-jobs) the returned promise resolves as soon as the job function has been *started*, like the queue itself does. Pass `{awaitCompletion: true}` to resolve only once the job function has finished and the job's state has been resolved, which is what you usually want when executing a job from a method or a test:
+
+```javascript
+await Jobs.execute(doc, {awaitCompletion: true});
+```
+
 ### Jobs.reschedule
 
 `Jobs.reschedule` allows you to reschedule a job. It can only work on jobs that have not been resolved.
@@ -592,6 +598,9 @@ If any of these differences make this package unsuitable for you, please let me 
 ------
 
 ## Version History
+
+#### Unreleased
+- `Jobs.execute(job, {awaitCompletion: true})` waits for an async job function to finish before resolving
 
 #### 2.0.0 (2026-08-10)
 - **BREAKING CHANGE**: Full migration to Meteor 3.0 async database operations

@@ -12,3 +12,8 @@ Package.onUse(function(api) {
 	api.mainModule("jobs.ts", "server");
 	api.export(["Jobs", "TypedJob"]);
 });
+
+Package.onTest(function(api) {
+	api.use(['ecmascript', 'typescript', 'mongo', 'meteortesting:mocha@3.3.0', 'wildhart:jobs'], 'server');
+	api.mainModule('tests/jobs.tests.js', 'server');
+});

@@ -288,7 +288,10 @@ export namespace Jobs {
 		awaitCompletion?: boolean;
 	}
 
-	export async function execute(jobOrId: JobOrId, options?: ExecuteOptions) {
+	// how a job was resolved, or 'executing' for an async job which is still running (no awaitCompletion)
+	export type ExecuteResult = 'success' | 'failure' | 'reschedule' | 'remove' | 'executing';
+
+	export async function execute(jobOrId: JobOrId, options?: ExecuteOptions): Promise<ExecuteResult | false> {
 		if (!jobOrId) {
 			console.warn('Jobs', '    Jobs.execute', 'JOB NOT FOUND', jobOrId);
 			return false;
@@ -299,14 +302,14 @@ export namespace Jobs {
 		const job = await collection.findOneAsync(jobId);
 		if (!job) {
 			console.warn('Jobs', 'Jobs.execute', 'JOB NOT FOUND', jobId);
-			return;
+			return false;
 		}
 		if (job.state != 'pending') {
 			console.warn('Jobs', 'Jobs.execute', 'JOB IS NOT PENDING', job);
-			return;
+			return false;
 		}
 
-		await Queue.executeJob(job, options);
+		return await Queue.executeJob(job, options);
 	}
 
 	export async function replicate(jobOrId: JobOrId, config: Partial<JobConfig>) {
@@ -577,16 +580,16 @@ namespace Queue {
 		await start();
 	}
 
-	export async function executeJob(job: Jobs.JobDocument, {awaitCompletion = false}: Jobs.ExecuteOptions = {}) {
+	export async function executeJob(job: Jobs.JobDocument, {awaitCompletion = false}: Jobs.ExecuteOptions = {}): Promise<Jobs.ExecuteResult> {
 		log('Jobs', '  ' + job.name);
 
 		if (typeof Jobs.jobs[job.name] == 'undefined') {
 			console.warn('Jobs', 'job does not exist:', job.name);
 			await setJobState(job._id, 'failure');
-			return;
+			return 'failure';
 		}
 
-		let action: Jobs.JobStatus | 'reschedule' | 'remove' | null = null;
+		let action: Jobs.ExecuteResult | null = null;
 
 		const self: Jobs.JobThisType = {
 			document: job,
@@ -611,36 +614,39 @@ namespace Queue {
 			},
 		};
 
-		async function completed() {
+		// apply defaultCompletion if the job did not resolve itself, and report how the job was resolved
+		async function completed(): Promise<Jobs.ExecuteResult> {
 			if (!action) {
 				if (settings.defaultCompletion == 'success') {
-					await setJobState(job._id, 'success');
+					action = 'success';
+					await setJobState(job._id, action);
 				} else if (settings.defaultCompletion == 'remove') {
+					action = 'remove';
 					await Jobs.remove(job._id);
 				} else {
 					console.warn('Jobs', "Job was not resolved with success, failure, reschedule or remove. Consider using the 'defaultCompletion' option.", job);
-					await setJobState(job._id, 'failure');
+					action = 'failure';
+					await setJobState(job._id, action);
 				}
 			}
+			return action;
 		}
 
-		let isAsync = false;
-		// settles once the job function has finished and its state is resolved;
+		// set for an async job function: settles once it has finished and its state is resolved;
 		// the queue does not wait for it (async jobs run concurrently) but Jobs.execute can.
-		let completion: Promise<void> = Promise.resolve();
+		let completion: Promise<Jobs.ExecuteResult> | null = null;
 
 		try {
 			await setJobState(job._id, 'executing');
-			const res = Jobs.jobs[job.name].apply(self, job.arguments);
+			const res: any = Jobs.jobs[job.name].apply(self, job.arguments);
 			if (res?.then) {
-				isAsync = true
 				if (job.awaitAsync) {
 					_awaitAsyncJobs.add(job.name);
 				}
 				completion = res.then(async () => {
 					log('Jobs', '    Done async job', job.name, 'result:', action);
 					_awaitAsyncJobs.delete(job.name);
-					await completed();
+					return await completed();
 				}).catch(async (e: any) => {
 					console.warn('Jobs', '    Error in async job', job);
 					console.warn(e);
@@ -648,6 +654,7 @@ namespace Queue {
 					if (action != 'reschedule') {
 						await self.failure();
 					}
+					return action ?? 'failure';
 				});
 			} else {
 				log('Jobs', '    Done job', job.name, 'result:', action);
@@ -660,11 +667,9 @@ namespace Queue {
 			}
 		}
 
-		if (!isAsync) {
-			await completed();
-		} else if (awaitCompletion) {
-			await completion;
-		}
+		return !completion ? await completed()
+			: awaitCompletion ? await completion
+			: 'executing';
 	}
 
 	async function setJobState(jobId: string, state: Jobs.JobStatus) {

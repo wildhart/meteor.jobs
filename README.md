@@ -412,6 +412,13 @@ For an [async job](#async-jobs) the returned promise resolves as soon as the job
 await Jobs.execute(doc, {awaitCompletion: true});
 ```
 
+The promise resolves to how the job was resolved: `'success'`, `'failure'`, `'reschedule'` or `'remove'` (including a resolution applied by `defaultCompletion`). For an async job without `awaitCompletion` it resolves to `'executing'`, since the job is still running. It resolves to `false` if the job was not found or is not pending.
+
+```javascript
+const result = await Jobs.execute(doc, {awaitCompletion: true});
+if (result == 'failure') { /* ... */ }
+```
+
 ### Jobs.reschedule
 
 `Jobs.reschedule` allows you to reschedule a job. It can only work on jobs that have not been resolved.
@@ -601,6 +608,7 @@ If any of these differences make this package unsuitable for you, please let me 
 
 #### Unreleased
 - `Jobs.execute(job, {awaitCompletion: true})` waits for an async job function to finish before resolving
+- `Jobs.execute` resolves to how the job was resolved (`'success'`, `'failure'`, `'reschedule'`, `'remove'`), `'executing'` for an async job still running, or `false` if the job was not found or not pending
 
 #### 2.0.0 (2026-08-10)
 - **BREAKING CHANGE**: Full migration to Meteor 3.0 async database operations

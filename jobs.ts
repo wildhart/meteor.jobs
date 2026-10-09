@@ -306,7 +306,7 @@ export namespace Jobs {
 			return;
 		}
 
-		await Queue.executeJob(job, !!options?.awaitCompletion);
+		await Queue.executeJob(job, options);
 	}
 
 	export async function replicate(jobOrId: JobOrId, config: Partial<JobConfig>) {
@@ -577,7 +577,7 @@ namespace Queue {
 		await start();
 	}
 
-	export async function executeJob(job: Jobs.JobDocument, awaitCompletion = false) {
+	export async function executeJob(job: Jobs.JobDocument, {awaitCompletion = false}: Jobs.ExecuteOptions = {}) {
 		log('Jobs', '  ' + job.name);
 
 		if (typeof Jobs.jobs[job.name] == 'undefined') {

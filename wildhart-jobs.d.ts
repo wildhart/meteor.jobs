@@ -11,6 +11,7 @@ declare module 'meteor/wildhart:jobs' {
             autoStart: boolean;
             setServerId?: string | Function;
             defaultCompletion?: 'success' | 'remove';
+            maxExecutionTime: number;
         }
 
         interface JobInConfig {
@@ -67,6 +68,7 @@ declare module 'meteor/wildhart:jobs' {
             attempts?: number,
             retries?: number,
             retryIn?: JobInConfig,
+            startedAt?: Date,
         }
 
         interface JobThisType {
@@ -99,6 +101,7 @@ declare module 'meteor/wildhart:jobs' {
         function start(jobNames?: string | string[]): Promise<void>;
         function stop(jobNames?: string | string[]): Promise<void>;
         function createIndexes(): Promise<void>;
+        function requeueExecuting(olderThan?: Date): Promise<number>;
     }
 
 	export class TypedJob<TArgs extends any[]> {

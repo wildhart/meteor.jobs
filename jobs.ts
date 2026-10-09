@@ -8,6 +8,7 @@ const settings: Jobs.Config = {
 	maxWait: 5 * 60 * 1000, // specify how long the server could be inactive before another server takes on the master role  (default=5 min)
 	log: console.log,
 	autoStart: true,
+	maxExecutionTime: 0, // (ms) requeue jobs which have been 'executing' longer than this; 0 = only on takeover
 };
 
 function log(...args: any) {
@@ -162,6 +163,9 @@ namespace Dominator {
 	async function _takeControl(reason: string) {
 		log('Jobs', 'takeControl', reason);
 		await _ping();
+		// only the server in control executes jobs, so anything still 'executing' now
+		// was started by a server which has since died or restarted.
+		await Jobs.requeueExecuting();
 		await Queue.start();
 	}
 
@@ -188,6 +192,9 @@ namespace Dominator {
 		}
 		await collection.upsertAsync({_id: DOMINATOR_ID}, newPing);
 		log('Jobs', 'ping', newPing.date, 'paused:', newPing.pausedJobs);
+		if (settings.maxExecutionTime > 0) {
+			await Jobs.requeueExecuting(new Date(Date.now() - settings.maxExecutionTime));
+		}
 	}
 }
 
@@ -202,6 +209,7 @@ export namespace Jobs {
 		autoStart: boolean;
 		setServerId?: string | Function;
 		defaultCompletion?: 'success' | 'remove';
+		maxExecutionTime: number;
 	}
 
 	export interface JobConfig {
@@ -233,6 +241,7 @@ export namespace Jobs {
 		attempts?: number,
 		retries?: number,
 		retryIn?: any,
+		startedAt?: Date,
 	}
 
 	export interface JobThisType {
@@ -265,6 +274,7 @@ export namespace Jobs {
 			autoStart: Match.Maybe(Boolean),
 			defaultCompletion: Match.Maybe(Match.Where((val => /^(success|remove)$/.test(val)))),
 			startupDelay: Match.Maybe(Number),
+			maxExecutionTime: Match.Maybe(Number),
 		});
 		Object.assign(settings, config);
 		if (settings.log === true) {
@@ -497,6 +507,27 @@ export namespace Jobs {
 	function isDuplicateKeyError(e: any) {
 		return e?.code == 11000 || /duplicate key/i.test(e?.message || '');
 	}
+
+	/**
+	 * Return 'executing' jobs to 'pending' so they run again. Called automatically when a
+	 * server takes control of the queue (the previous server died or restarted mid-job) and,
+	 * when `maxExecutionTime` is configured, on every ping for jobs started before `olderThan`.
+	 * Jobs are rerun from scratch, so job functions should be safe to run more than once.
+	 */
+	export async function requeueExecuting(olderThan?: Date) {
+		const query: Mongo.Query<JobDocument> = {state: 'executing'};
+		if (olderThan) {
+			query.startedAt = {$lte: olderThan};
+		}
+		const count = await collection.updateAsync(query, {
+			$set: {state: 'pending'},
+			$unset: {startedAt: ''},
+		}, {multi: true});
+		if (count) {
+			log('Jobs', 'requeueExecuting', count, olderThan || 'all');
+		}
+		return count;
+	}
 }
 
 /********************************* Queue *********************/
@@ -695,7 +726,7 @@ namespace Queue {
 
 		try {
 			// `attempts` counts the runs of the current scheduling of the job (reset by Jobs.reschedule)
-			await Jobs.collection.updateAsync({_id: job._id}, {$set: {state: 'executing'}, $inc: {attempts: 1}});
+			await Jobs.collection.updateAsync({_id: job._id}, {$set: {state: 'executing', startedAt: new Date()}, $inc: {attempts: 1}});
 			job.attempts = (job.attempts || 0) + 1;
 			const res: any = Jobs.jobs[job.name].apply(self, job.arguments);
 			if (res?.then) {

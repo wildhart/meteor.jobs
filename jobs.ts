@@ -14,6 +14,45 @@ function log(...args: any) {
 	typeof settings.log == 'function' && settings.log(...args);
 }
 
+// used by Jobs.run/replicate/reschedule and by the Queue retry path; kept off the Jobs namespace so it is not exposed to apps
+function getDateFromConfig(config: Partial<Jobs.JobConfig>) {
+	// https://github.com/msavin/SteveJobs..meteor.jobs.scheduler.queue.background.tasks/blob/031fdf5051b2f2581a47f64ab5b54ffbb6893cf8/package/server/imports/utilities/helpers/date.js
+	check(config, Match.ObjectIncluding({
+		date: Match.Maybe(Date),
+		in: Match.Maybe(Object),
+		on: Match.Maybe(Object),
+	}));
+
+	let currentDate = config.date || new Date();
+	let newNumber: number;
+	let fn: string;
+
+	Object.keys(config).forEach(key1 => {
+		if (["in", "on"].indexOf(key1) > -1) {
+			Object.keys(config[key1]).forEach(key2 => {
+				try {
+					newNumber = Number(config[key1][key2]);
+					if (isNaN(newNumber)) {
+						console.warn('Jobs', `invalid type was input: {key1}.{key2}`, newNumber)
+					} else {
+						// convert month(s) => months (etc), and day(s) => date and year(s) => fullYear
+						fn = (key2 + "s").replace('ss', 's').replace('days','date').replace('years','fullYear').replace('months','month');
+						// convert months => Months
+						fn = fn.charAt(0).toUpperCase() + fn.slice(1);
+						// if key1=='in' currentDate.setMonth(newNumber + currentDate.getMonth())
+						// if key1=='on' currentDate.setMonth(newNumber)
+						currentDate['set' + fn](newNumber + (key1 == 'in' ? currentDate['get' + fn]() : 0));
+					}
+				} catch (e) {
+					console.warn('Jobs', `invalid argument was ignored: {key1}.{key2}`, newNumber, fn);
+					console.log(e);
+				}
+			});
+		}
+	});
+	return currentDate;
+}
+
 /********************************* Dominator *********************/
 
 namespace Dominator {
@@ -257,6 +296,10 @@ export namespace Jobs {
 			// validate before the unique/singular queries below so a bad id fails fast
 			check(config.jobId, Match.Where((id: any) => typeof id == 'string' && id.length > 0));
 		}
+		if (config?.retries !== undefined) {
+			check(config.retries, Match.Where((n: any) => Number.isInteger(n) && n >= 0));
+			check(config.retryIn, Match.Maybe(Object));
+		}
 		var error;
 		if (config?.unique) { // If a job is marked as unique, it will only be scheduled if no other job exists with the same arguments
 			if (await count(name, ...args)) error = "Unique job already exists";
@@ -282,10 +325,6 @@ export namespace Jobs {
 			retries: config?.retries || undefined,
 			retryIn: config?.retries && config.retryIn || undefined,
 		};
-		if (jobDoc.retries !== undefined) {
-			check(jobDoc.retries, Number);
-			check(jobDoc.retryIn, Match.Maybe(Object));
-		}
 		if (config?.jobId !== undefined) {
 			// caller-chosen id, so a job can be enqueued idempotently and looked up without a query
 			jobDoc._id = config.jobId;
@@ -360,6 +399,7 @@ export namespace Jobs {
 		}
 
 		delete (job as any)._id;
+		delete job.attempts; // the copy keeps `retries`/`retryIn` but starts its own run cycle
 		job.due = date;
 		job.state = 'pending';
 		const newJobId = await collection.insertAsync(job);
@@ -379,7 +419,8 @@ export namespace Jobs {
 		if (config.priority) {
 			set.priority = config.priority;
 		}
-		const count = await collection.updateAsync({_id: jobId}, {$set: set});
+		// a reschedule starts a new run cycle, so the job gets its full `retries` again (see Queue.executeJob)
+		const count = await collection.updateAsync({_id: jobId}, {$set: set, $unset: {attempts: ''}});
 		log('Jobs', '    Jobs.reschedule', jobId, config, date, count);
 		if (typeof config.callback == 'function') {
 			config.callback(count==0, count);
@@ -455,44 +496,6 @@ export namespace Jobs {
 
 	function isDuplicateKeyError(e: any) {
 		return e?.code == 11000 || /duplicate key/i.test(e?.message || '');
-	}
-
-	function getDateFromConfig(config: Partial<Jobs.JobConfig>) {
-		// https://github.com/msavin/SteveJobs..meteor.jobs.scheduler.queue.background.tasks/blob/031fdf5051b2f2581a47f64ab5b54ffbb6893cf8/package/server/imports/utilities/helpers/date.js
-		check(config, Match.ObjectIncluding({
-			date: Match.Maybe(Date),
-			in: Match.Maybe(Object),
-			on: Match.Maybe(Object),
-		}));
-
-		let currentDate = config.date || new Date();
-		let newNumber: number;
-		let fn: string;
-
-		Object.keys(config).forEach(key1 => {
-			if (["in", "on"].indexOf(key1) > -1) {
-				Object.keys(config[key1]).forEach(key2 => {
-					try {
-						newNumber = Number(config[key1][key2]);
-						if (isNaN(newNumber)) {
-							console.warn('Jobs', `invalid type was input: {key1}.{key2}`, newNumber)
-						} else {
-							// convert month(s) => months (etc), and day(s) => date and year(s) => fullYear
-							fn = (key2 + "s").replace('ss', 's').replace('days','date').replace('years','fullYear').replace('months','month');
-							// convert months => Months
-							fn = fn.charAt(0).toUpperCase() + fn.slice(1);
-							// if key1=='in' currentDate.setMonth(newNumber + currentDate.getMonth())
-							// if key1=='on' currentDate.setMonth(newNumber)
-							currentDate['set' + fn](newNumber + (key1 == 'in' ? currentDate['get' + fn]() : 0));
-						}
-					} catch (e) {
-						console.warn('Jobs', `invalid argument was ignored: {key1}.{key2}`, newNumber, fn);
-						console.log(e);
-					}
-				});
-			}
-		});
-		return currentDate;
 	}
 }
 
@@ -669,7 +672,7 @@ namespace Queue {
 			return action;
 		}
 
-		// retry a job which threw (or rejected) if it has retries left, otherwise mark it failed
+		// retry a job whose function threw (or rejected) if it has retries left, otherwise mark it failed
 		async function failed() {
 			if (action == 'reschedule') {
 				return;
@@ -677,7 +680,10 @@ namespace Queue {
 			const attempts = job.attempts || 0;
 			if (job.retries && attempts <= job.retries) {
 				log('Jobs', '    retrying', job.name, 'attempt', attempts, 'of', job.retries + 1);
-				await self.reschedule({in: job.retryIn || {}});
+				action = 'reschedule';
+				// not Jobs.reschedule(): that resets `attempts`, because a reschedule by the job or the app starts a new run cycle
+				const due = getDateFromConfig({in: job.retryIn || {}});
+				await Jobs.collection.updateAsync({_id: job._id}, {$set: {state: 'pending', due}});
 			} else {
 				await self.failure();
 			}
@@ -688,6 +694,7 @@ namespace Queue {
 		let completion: Promise<Jobs.ExecuteResult> | null = null;
 
 		try {
+			// `attempts` counts the runs of the current scheduling of the job (reset by Jobs.reschedule)
 			await Jobs.collection.updateAsync({_id: job._id}, {$set: {state: 'executing'}, $inc: {attempts: 1}});
 			job.attempts = (job.attempts || 0) + 1;
 			const res: any = Jobs.jobs[job.name].apply(self, job.arguments);

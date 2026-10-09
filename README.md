@@ -398,10 +398,11 @@ The configuration object supports the following inputs:
 	- "In any state" includes finished jobs: a job resolved with `this.success()` (or `defaultCompletion: 'success'`) keeps its id occupied until it is removed, so pair `jobId` with `this.remove()` or `defaultCompletion: 'remove'` if you want to schedule the same id again later. `Jobs.replicate` of a job with a custom id gives the copy a generated id.
 	- Must be a non-empty string. Note that a trailing argument object which happens to contain a `jobId` key is now treated as the configuration object, as with every other configuration key.
 * **`retries`** - Number
-	- How many times to run the job again if its function throws (or its promise rejects). The default is 0: the job is marked `'failure'` on the first error. With `retries: 2` the job runs up to 3 times. An explicit `this.failure()` is never retried.
+	- How many times to run the job again if its function throws (or its promise rejects). The default is 0: the job is marked `'failure'` on the first error. With `retries: 2` the job runs up to 3 times. An explicit `this.failure()` is never retried. Must be a non-negative integer.
 * **`retryIn`** - Object
 	- How long to wait before each retry, in the same format as `in` (e.g. `{minutes: 5}`). The default is to retry as soon as possible.
-	- The job document records how many times it has run in `attempts`, also available in the job function as `this.document.attempts`.
+	- The job document records how many times the current scheduling of the job has run in `attempts`, also available in the job function as `this.document.attempts`. `attempts` is recorded for every job, not only those with `retries`.
+	- Rescheduling a job with `this.reschedule()` or `Jobs.reschedule()` starts a new run cycle and resets `attempts`, so a [repeating job](#repeating-jobs) gets its full `retries` on every run. `Jobs.replicate` copies `retries` and `retryIn` to the new job but not `attempts`.
 - **`callback`** - Function
 	- Run a callback function after scheduling the job
 
@@ -619,7 +620,7 @@ If any of these differences make this package unsuitable for you, please let me 
 - `Jobs.execute(job, {awaitCompletion: true})` waits for an async job function to finish before resolving
 - `Jobs.execute` resolves to how the job was resolved (`'success'`, `'failure'`, `'reschedule'`, `'remove'`), `'executing'` for an async job still running, or `false` if the job was not found or not pending
 - `Jobs.run` accepts a `jobId` config option to choose the job document's `_id`; a duplicate id returns `false` like `unique`/`singular`. A trailing argument object containing a `jobId` key is now recognised as the config object
-- `Jobs.run` accepts `retries` and `retryIn` to rerun a job whose function throws; job documents record `attempts`
+- `Jobs.run` accepts `retries` and `retryIn` to rerun a job whose function throws. All job documents now record `attempts` (runs of the current scheduling, reset by a reschedule). A trailing argument object containing a `retries` or `retryIn` key is now recognised as the config object
 
 #### 2.0.0 (2026-08-10)
 - **BREAKING CHANGE**: Full migration to Meteor 3.0 async database operations

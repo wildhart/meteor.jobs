@@ -3,6 +3,8 @@
 
 Run scheduled tasks with the simple jobs queue made just for Meteor. With tight MongoDB integration, this package is quick, reliable and effortless to use.
 
+This is the async line of the package, for Meteor 2.8.1 and later including Meteor 3. For Meteor 1.3 to 2.x with the synchronous (Fibers) API, use `wildhart:jobs-fibers` instead; see **[Which package do I want?](#which-package-do-i-want)** below.
+
 - Jobs run on one server at a time
 - Jobs run predictably and consecutively
 - Job timers are super-efficient
@@ -11,13 +13,24 @@ Run scheduled tasks with the simple jobs queue made just for Meteor. With tight 
 
 It can run hundreds of jobs in seconds with minimal CPU impact, making it a reasonable choice for many applications. To get started, check out the **[quick start guide](#quick-start)** and the **[full API documentation](#api-documentation)** below.
 
-## Version 2.0.0 - async API (BREAKING CHANGE), Meteor 3.0 compatible
+## Which package do I want?
 
-Version 2.0.0 is **async-only**: every API method now returns a Promise which must be awaited, including the `this.*` methods inside your job functions - see the **[migration guide](#migration-guide-for-v20-async-api)**. Which version you should install:
+This repository publishes two packages from one codebase:
 
-- **Meteor 3.0+**: use v2.0.0.
-- **Meteor 2.8 - 2.x**: v2.0.0 works (it uses the async MongoDB API introduced in Meteor 2.8), provided *all* your calls are awaited as per the migration guide. Un-awaited fiber-style code will misbehave silently (a returned Promise is always truthy). This lets you migrate your app to async/await while still on Meteor 2.x, before bumping to Meteor 3.
-- **Meteor < 2.8, or still using fiber-style sync calls?** Stay on the previous major version: `meteor add wildhart:jobs@1.0.18`. v1.x works on Meteor 2.x and below, but not on Meteor 3.
+| Package | API | Meteor | Branch |
+|---|---|---|---|
+| `wildhart:jobs` (this one) | async (`await Jobs.run()`, async job functions) | 2.8.1 and later, including 3.x | `master` |
+| [`wildhart:jobs-fibers`](https://github.com/wildhart/meteor.jobs/tree/fibers) | synchronous, Fibers-based | 1.3 to 2.x | `fibers` |
+
+Both lines get the same features, with matching minor version numbers (2.2.x here is at feature parity with 1.2.x of `wildhart:jobs-fibers`).
+
+- **Meteor 3.0+**: use `wildhart:jobs` 2.x. Nothing else runs on Meteor 3.
+- **Meteor 2.8 - 2.x**: either works. `wildhart:jobs` 2.x uses the async MongoDB API introduced in Meteor 2.8, provided *all* your calls are awaited as per the migration guide; un-awaited fiber-style code misbehaves silently, since a returned Promise is always truthy. This lets you migrate your app to async/await while still on Meteor 2.x, before bumping to Meteor 3. If you would rather keep synchronous job functions for now, use `wildhart:jobs-fibers`.
+- **Meteor < 2.8**: use `wildhart:jobs-fibers`.
+
+### Version 2.0.0 - async API (BREAKING CHANGE), Meteor 3.0 compatible
+
+Version 2.0.0 is **async-only**: every API method returns a Promise which must be awaited, including the `this.*` methods inside your job functions - see the **[migration guide](#migration-guide-for-v20-async-api)**. Apps on `wildhart:jobs` 1.0.x which are not ready for that should switch to `wildhart:jobs-fibers`, which continues the synchronous line with the same features: `meteor remove wildhart:jobs`, `meteor add wildhart:jobs-fibers`, and change the import path. The exported globals, API and `jobs_data` collection are unchanged.
 
 ## Coming from msavin:jobs?
 
@@ -710,7 +723,10 @@ TEST_CLIENT=0 meteor --release METEOR@3.5.2 test-packages ./ --port 3100 --once 
 
 ## Version History
 
-#### 2.2.0 (2026-10-10)
+#### 2.2.1 (2026-10-11)
+- Documentation only: the synchronous (Fibers) line for Meteor 1.3 to 2.x is now published as [`wildhart:jobs-fibers`](https://github.com/wildhart/meteor.jobs/tree/fibers) 1.2.0, at feature parity with this release. See "Which package do I want?"
+
+#### 2.2.0 (2026-10-11)
 - Opt-in [Monti APM](#monti-apm) jobs dashboard integration: `Jobs.configure({monti: true})` traces every job run and counts added jobs, `{monti: {pendingInterval}}` also reports pending counts. The agent is found at run time, so `montiapm:agent` is not a dependency. Requested in [#32](https://github.com/wildhart/meteor.jobs/issues/32)
 - `Jobs.configure({dontRunJobs: true})` keeps a server from ever running the job queue, so jobs can be kept on dedicated servers (see "Dedicated jobs server"). Requested in [#30](https://github.com/wildhart/meteor.jobs/issues/30)
 - A warning is logged when two servers are running with the same `setServerId` (both would run every job)

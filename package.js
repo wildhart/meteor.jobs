@@ -21,4 +21,5 @@ Package.onTest(function(api) {
 	api.addFiles('tests/retry-failed-jobs.tests.js', 'server');
 	api.addFiles('tests/recover-executing-jobs.tests.js', 'server');
 	api.addFiles('tests/monti.tests.js', 'server');
+	api.addFiles('tests/dont-run-jobs.tests.js', 'server');
 });

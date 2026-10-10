@@ -287,6 +287,9 @@ Jobs.configure({
     // determine how to set the serverId - see below. (default = random string)
     setServerId: String || Function,
 
+    // this server never runs the job queue (default = false) - see "Dedicated jobs server" below.
+    dontRunJobs: Boolean,
+
     // determine if/how to log the package outputs (default = console.log)
     log: Boolean || Function,
 
@@ -313,6 +316,24 @@ Jobs.configure({
 })
 ```
 `setServerId` - In a **multi-server deployment**, jobs are only executed on one server.  Each server should have a unique ID so that it knows if it is control of the job queue or not. You can provide a function which returns a serverId from somewhere (e.g. from an environment variable) or just use the default of a random string.  In a **single-server deployment** set this to a static string so that the server knows that it is always in control and can take control more quickly after a reboot.
+
+#### Dedicated jobs server
+
+By default any server may take control of the job queue, so with several servers running the same code you cannot choose which one runs the jobs. To keep them on one or more **dedicated servers** (for example a box which handles no user connections, see [#30](https://github.com/wildhart/meteor.jobs/issues/30)), set `dontRunJobs: true` on every other server, typically from an environment variable:
+
+```javascript
+Jobs.configure({
+    dontRunJobs: !process.env.JOB_RUNNER,  // only the dedicated server(s) have JOB_RUNNER set
+    setServerId: process.env.JOB_RUNNER,   // optional: a static id lets a dedicated server resume control instantly after a restart
+});
+```
+
+* A server with `dontRunJobs` never takes control of the queue, even when the server in control goes quiet. If every dedicated server is down, jobs wait.
+* Several dedicated servers elect among themselves as usual: whichever takes control first runs the jobs and the others take over after `maxWait` if it goes quiet. Each one still needs its own unique `setServerId` (or the random default).
+* A server with `dontRunJobs` can still schedule jobs with `Jobs.run()`, pause and resume the queue with `Jobs.stop()` / `Jobs.start()`, and run a pending job on demand with `Jobs.execute()`, which runs the job function on the server which calls it.
+* The first deployment which introduces the option can leave the queue idle for up to `maxWait` if an older server was in control, until its last ping goes stale. After that a dedicated server with a static `setServerId` resumes control instantly when it restarts.
+
+If two servers are ever started with the same `setServerId`, both believe they are in control and every job runs twice. Since 2.2.0 the package detects this and logs a warning on each of them.
 
 ### Jobs.register
 
@@ -691,6 +712,8 @@ TEST_CLIENT=0 meteor --release METEOR@3.5.2 test-packages ./ --port 3100 --once 
 
 #### 2.2.0 (2026-10-10)
 - Opt-in [Monti APM](#monti-apm) jobs dashboard integration: `Jobs.configure({monti: true})` traces every job run and counts added jobs, `{monti: {pendingInterval}}` also reports pending counts. The agent is found at run time, so `montiapm:agent` is not a dependency. Requested in [#32](https://github.com/wildhart/meteor.jobs/issues/32)
+- `Jobs.configure({dontRunJobs: true})` keeps a server from ever running the job queue, so jobs can be kept on dedicated servers (see "Dedicated jobs server"). Requested in [#30](https://github.com/wildhart/meteor.jobs/issues/30)
+- A warning is logged when two servers are running with the same `setServerId` (both would run every job)
 - Fixed: `Jobs.execute()` could resolve before the state write of a sync job function's un-awaited `this.success()` (or `failure`/`remove`/`reschedule`) had reached the database
 
 #### 2.1.0 (2026-10-10)

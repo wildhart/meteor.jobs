@@ -27,6 +27,13 @@ declare module 'meteor/wildhart:jobs' {
              */
             setServerId?: string | Function;
             /**
+             * Opt-out of running the job queue on this server (default `false`). A server with this set never takes
+             * control of the queue, even when the server in control goes quiet, but can still schedule jobs, pause and
+             * resume the queue, and run one job on demand with `Jobs.execute()`. Set it on web servers to keep jobs
+             * on one or more dedicated servers. See "Dedicated jobs server" in the README.
+             */
+            dontRunJobs: boolean;
+            /**
              * What to do with a job whose function returned without calling `this.success()`, `this.failure()`,
              * `this.reschedule()` or `this.remove()`. Unset (default): mark it `'failure'` and log a warning.
              * Pass `null` to return to the default after setting it.

@@ -11,6 +11,7 @@ const settings: Jobs.Config = {
 	autoStart: true,
 	requeueOnTakeover: false, // requeue jobs left 'executing' whenever this server takes control of the queue (see README "Crash recovery")
 	maxExecutionTime: 0, // (ms) requeue jobs which have been 'executing' longer than this, checked on every ping; 0 = off
+	dontRunJobs: false, // #30 this server never takes control of the job queue (see README "Dedicated jobs server")
 	monti: false, // Monti APM jobs dashboard integration (see README "Monti APM")
 };
 
@@ -64,6 +65,7 @@ namespace Dominator {
 	interface Document {
 		_id?: string,
 		serverId?: string | null,
+		instance?: string, // random per process, see _instanceId
 		pausedJobs: string[],
 		date?: Date,
 	}
@@ -75,6 +77,9 @@ namespace Dominator {
 	let _serverId: string | undefined | null = null;
 	let _pingInterval: number | null =  null;
 	let _takeControlTimeout: number | null = null;
+	// identifies this process within its serverId, so two servers configured with the same serverId can be detected
+	const _instanceId = Random.id();
+	let _warnedDuplicateServerId = false;
 
 	Meteor.startup(async () => {
 		log('Jobs', `Meteor.startup, startupDelay: ${settings.startupDelay / 1000}s...`);
@@ -87,6 +92,11 @@ namespace Dominator {
 		_serverId = (typeof settings.setServerId == 'string' && settings.setServerId)
 			|| (typeof settings.setServerId == 'function' && settings.setServerId())
 			|| Random.id();
+
+		if (settings.dontRunJobs) {
+			// #30 the option is an explicit opt-in, so an ordinary log line is enough to confirm it at start-up
+			log('Jobs', `dontRunJobs is set, so this server (${_serverId}) will not run the job queue`);
+		}
 
 		await collection.find({_id: DOMINATOR_ID}).observeAsync({
 			changed: (newPing) => _observer(newPing),
@@ -139,6 +149,12 @@ namespace Dominator {
 
 	function _observer(newPing: Document) {
 		log('Jobs', 'dominator.observer', newPing);
+		if (newPing.serverId == _serverId && newPing.instance && newPing.instance != _instanceId && !_warnedDuplicateServerId) {
+			// both servers believe they are in control and every job would run twice; nothing here can tell which one
+			// should back off, so make the misconfiguration loud and leave it to the app
+			_warnedDuplicateServerId = true;
+			console.warn('Jobs', `another server is using the same serverId '${_serverId}': jobs will run on both. Give every server a unique setServerId, or set dontRunJobs on the ones which should not run jobs.`);
+		}
 		if (lastPing && lastPing.serverId == _serverId && newPing.serverId != _serverId) {
 			// we were in control but another server has taken control
 			_relinquishControl();
@@ -154,7 +170,7 @@ namespace Dominator {
 			Meteor.clearTimeout(_takeControlTimeout);
 			_takeControlTimeout = null;
 		}
-		if (lastPing.serverId != _serverId) {
+		if (lastPing.serverId != _serverId && !settings.dontRunJobs) {
 			// we're not in control, set a timer to take control in the future...
 			_takeControlTimeout = Meteor.setTimeout(() => {
 				// if this timeout isn't cleared then the dominator hasn't been updated recently so we should take control.
@@ -164,6 +180,11 @@ namespace Dominator {
 	}
 
 	async function _takeControl(reason: string) {
+		if (settings.dontRunJobs) {
+			// #30 every start-up path and takeover comes through here, so this is the one place the rule is enforced
+			log('Jobs', 'takeControl refused: dontRunJobs is set', reason);
+			return;
+		}
 		log('Jobs', 'takeControl', reason);
 		await _ping();
 		if (settings.requeueOnTakeover) {
@@ -191,6 +212,7 @@ namespace Dominator {
 		}
 		const newPing: Document = {
 			serverId: _serverId,
+			instance: _instanceId,
 			pausedJobs: lastPing ? (lastPing.pausedJobs || []) : (settings.autoStart ? [] : ['*']),
 			date: new Date(),
 		};
@@ -215,6 +237,7 @@ export namespace Jobs {
 		log: typeof console.log | boolean;
 		autoStart: boolean;
 		setServerId?: string | Function;
+		dontRunJobs: boolean;
 		defaultCompletion?: 'success' | 'remove' | null;
 		requeueOnTakeover: boolean;
 		maxExecutionTime: number;
@@ -282,6 +305,7 @@ export namespace Jobs {
 		check(config, {
 			maxWait: Match.Maybe(Number),
 			setServerId: Match.Maybe(Match.OneOf(String, Function)),
+			dontRunJobs: Match.Maybe(Boolean),
 			log: Match.Maybe(Match.OneOf(undefined, null, Boolean, Function)),
 			autoStart: Match.Maybe(Boolean),
 			// null returns to the default (unset); check() validates an explicit undefined against the inner pattern, so allow null instead

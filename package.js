@@ -1,6 +1,6 @@
 Package.describe({
 	name: 'wildhart:jobs',
-	version: '2.1.0',
+	version: '2.2.0',
 	summary: 'Schedule jobs to run at a later time, multi-server, super efficient (Meteor 3.0 compatible)',
 	git: 'https://github.com/wildhart/meteor.jobs',
 	documentation: 'README.md'
@@ -20,4 +20,5 @@ Package.onTest(function(api) {
 	api.addFiles('tests/custom-job-id.tests.js', 'server');
 	api.addFiles('tests/retry-failed-jobs.tests.js', 'server');
 	api.addFiles('tests/recover-executing-jobs.tests.js', 'server');
+	api.addFiles('tests/monti.tests.js', 'server');
 });

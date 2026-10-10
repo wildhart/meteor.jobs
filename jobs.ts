@@ -1,4 +1,5 @@
 import _TypedJob from "./TypedJob";
+import * as Monti from "./monti";
 
 export const TypedJob = _TypedJob;
 export type JobOrId = string | false | null | {_id: string};
@@ -10,6 +11,7 @@ const settings: Jobs.Config = {
 	autoStart: true,
 	requeueOnTakeover: false, // requeue jobs left 'executing' whenever this server takes control of the queue (see README "Crash recovery")
 	maxExecutionTime: 0, // (ms) requeue jobs which have been 'executing' longer than this, checked on every ping; 0 = off
+	monti: false, // Monti APM jobs dashboard integration (see README "Monti APM")
 };
 
 function log(...args: any) {
@@ -169,6 +171,7 @@ namespace Dominator {
 			// started by a server which has since died or restarted. Opt-in: it makes execution at-least-once.
 			await Jobs.requeueExecuting();
 		}
+		Monti.setControlling(true);
 		await Queue.start();
 	}
 
@@ -178,6 +181,7 @@ namespace Dominator {
 			Meteor.clearInterval(_pingInterval);
 			_pingInterval = null;
 		}
+		Monti.setControlling(false);
 		Queue.stop();
 	}
 
@@ -214,6 +218,7 @@ export namespace Jobs {
 		defaultCompletion?: 'success' | 'remove' | null;
 		requeueOnTakeover: boolean;
 		maxExecutionTime: number;
+		monti?: Monti.MontiConfig;
 	}
 
 	export interface JobConfig {
@@ -284,10 +289,17 @@ export namespace Jobs {
 			startupDelay: Match.Maybe(Number),
 			requeueOnTakeover: Match.Maybe(Boolean),
 			maxExecutionTime: Match.Maybe(Number),
+			monti: Match.Maybe(Match.OneOf(Boolean, {
+				pendingInterval: Match.Maybe(Number),
+				agent: Match.Maybe(Match.Where((agent: any) => !!agent && ['traceJob', 'recordNewJob', 'recordPendingJobs'].every(fn => typeof agent[fn] == 'function'))),
+			})),
 		});
 		Object.assign(settings, config);
 		if (settings.log === true) {
 			settings.log = console.log;
+		}
+		if ('monti' in config) {
+			Monti.configure(settings.monti, {collection, jobNames: () => Object.keys(jobs)});
 		}
 		log('Jobs', 'Jobs.configure', Object.keys(config));
 	}
@@ -364,6 +376,7 @@ export namespace Jobs {
 		}
 		if (jobId) {
 			jobDoc._id = jobId;
+			Monti.recordNewJob(name); // not on the unique/singular/duplicate-jobId refusal paths above
 		} else {
 			error = true;
 		}
@@ -685,6 +698,9 @@ namespace Queue {
 		}
 
 		let action: Jobs.ExecuteResult | null = null;
+		// the database write behind the job's own this.success()/failure()/remove()/reschedule(). A sync job
+		// function cannot await it, so completed() does: Jobs.execute() never resolves before the document is updated
+		let actionWrite: Promise<unknown> | null = null;
 
 		const self: Jobs.JobThisType = {
 			document: job,
@@ -693,19 +709,19 @@ namespace Queue {
 			},
 			reschedule: async function(config) {
 				action = 'reschedule';
-				await Jobs.reschedule(job._id, config);
+				await (actionWrite = Jobs.reschedule(job._id, config));
 			},
-			remove: async function() {
+			remove: function() {
 				action = 'remove';
-				return await Jobs.remove(job._id);
+				return actionWrite = Jobs.remove(job._id);
 			},
-			success: async function() {
+			success: function() {
 				action = 'success';
-				return await setJobState(job._id, action);
+				return actionWrite = setJobState(job._id, action);
 			},
-			failure: async function() {
+			failure: function() {
 				action = 'failure';
-				return await setJobState(job._id, action);
+				return actionWrite = setJobState(job._id, action);
 			},
 		};
 
@@ -722,6 +738,14 @@ namespace Queue {
 					console.warn('Jobs', "Job was not resolved with success, failure, reschedule or remove. Consider using the 'defaultCompletion' option.", job);
 					action = 'failure';
 					await setJobState(job._id, action);
+				}
+			} else if (actionWrite) {
+				try {
+					await actionWrite;
+				} catch (e) {
+					// an async job function which awaited the call has already seen this error; a sync one could not
+					console.warn('Jobs', 'Error updating job state', job);
+					console.warn(e);
 				}
 			}
 			return action;
@@ -752,7 +776,9 @@ namespace Queue {
 			// `attempts` counts the runs of the current scheduling of the job (reset by Jobs.reschedule)
 			await Jobs.collection.updateAsync({_id: job._id}, {$set: {state: 'executing', startedAt: new Date()}, $inc: {attempts: 1}});
 			job.attempts = (job.attempts || 0) + 1;
-			const res: any = Jobs.jobs[job.name].apply(self, job.arguments);
+			// Monti.trace() returns the job function's result (or runs it directly when monti is off), so
+			// the promise detection and completion handling below are the same either way
+			const res: any = Monti.trace(job, () => Jobs.jobs[job.name].apply(self, job.arguments));
 			if (res?.then) {
 				if (job.awaitAsync) {
 					_awaitAsyncJobs.add(job.name);

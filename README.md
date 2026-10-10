@@ -266,6 +266,8 @@ if (Meteor.isServer) {
  - [Jobs.collection](#jobscollection)
  - [Repeating Jobs](#repeating-jobs)
  - [Async Jobs/Promises](#async-jobs)
+ - [Crash recovery](#crash-recovery)
+ - [Monti APM](#monti-apm)
  - [Bulk Operations](#bulk-operations)
  - [Version History](#version-history)
 
@@ -304,6 +306,10 @@ Jobs.configure({
     // (milliseconds) requeue jobs which have been 'executing' for longer than this,
     // checked on every ping. 0 (default) = off. See "Crash recovery" below.
     maxExecutionTime: Number,
+
+    // Monti APM jobs dashboard integration (default = false). true traces every job run,
+    // {pendingInterval: ms} additionally reports pending counts. See "Monti APM" below.
+    monti: Boolean || {pendingInterval: Number},
 })
 ```
 `setServerId` - In a **multi-server deployment**, jobs are only executed on one server.  Each server should have a unique ID so that it knows if it is control of the job queue or not. You can provide a function which returns a serverId from somewhere (e.g. from an environment variable) or just use the default of a random string.  In a **single-server deployment** set this to a static string so that the server knows that it is always in control and can take control more quickly after a reboot.
@@ -608,6 +614,28 @@ Before enabling either, make sure your job functions are safe to run more than o
 
 You can also call `Jobs.requeueExecuting()` yourself, optionally with a `Date` to only requeue jobs started before it. It returns the number of jobs requeued. A single-server deployment can, for example, call it once from `Meteor.startup()` instead of enabling `requeueOnTakeover`.
 
+## Monti APM
+
+If your app uses [Monti APM](https://montiapm.com) (`montiapm:agent` 2.44 or later, or the Meteor 3 agent), the package can feed its [Jobs dashboard](https://docs.montiapm.com/dashboards/jobs-dashboard). It is opt-in:
+
+```javascript
+Jobs.configure({
+    monti: true,                             // trace every job run, count jobs added by Jobs.run()
+    // or
+    monti: {pendingInterval: 20 * 1000},     // ... and report the number of pending jobs every 20s
+});
+```
+
+`montiapm:agent` is **not** a dependency of this package. The agent is looked up at run time, so an app without it (or on any version of it) builds unchanged. If `monti` is set but the agent is not found, the package logs one warning and runs jobs without tracing.
+
+What you get:
+
+* Every job run is a **trace** named after the job (job names map 1:1 to Monti trace names, and Monti suggests keeping those to a few dozen). The trace's **delay** is `now - due`, i.e. how late the job started; it is 0 for a job run ahead of time with [`Jobs.execute()`](#jobsexecute). The trace's start data contains the job `_id`, its `arguments` and the `attempt` number. If arguments are sensitive, mask them with Monti's own `Monti.tracer.addFilter()`.
+* A run is **errored** only when the job function throws or rejects. A job which calls `this.failure()` shows as a completed run. A retry (see `retries` in [`Jobs.run()`](#jobsrun)) is a separate run with its own delay.
+* **Added** counts every job inserted by `Jobs.run()`. Jobs refused by `unique`, `singular` or a duplicate `jobId` are not counted.
+* **Pending** counts are off by default (Monti recommends it for performance reasons). With `pendingInterval`, the server in control of the queue reports the number of pending jobs for every registered job name, right after taking control and then every interval. Each report is one aggregation over the pending documents, which the package's `{name, due, state}` index cannot serve on its own; if your `jobs_data` collection is large, add a `{state: 1, name: 1}` index yourself before enabling it. Monti suggests an interval of 10 to 50 seconds.
+* A job run with `Jobs.execute()` from inside a Meteor method (or any other Monti trace) is folded into that trace rather than shown as a job. This is how the agent behaves and is not configurable here.
+
 ## Bulk Operations
 
 The job queue intelligently prevents lots of a single job dominating the job queue, so feel free to use this package to safely schedule bulk operations, e.g, sending 1000s of emails. Although it may take some time to send all of these emails, any other jobs which are scheduled to run while they are being sent will still be run on time.  Run each operation as its own job (e.g, 1000 separate `"sendSingleEmail"` jobs rather than a single `"send1000Emails"` job.  The job queue will run all 1000 `"sendSingleEmail"` jobs in sequence, but after each job it will check if any other jobs need to run first.
@@ -660,6 +688,10 @@ TEST_CLIENT=0 meteor --release METEOR@3.5.2 test-packages ./ --port 3100 --once 
 ------
 
 ## Version History
+
+#### 2.2.0 (2026-10-10)
+- Opt-in [Monti APM](#monti-apm) jobs dashboard integration: `Jobs.configure({monti: true})` traces every job run and counts added jobs, `{monti: {pendingInterval}}` also reports pending counts. The agent is found at run time, so `montiapm:agent` is not a dependency. Requested in [#32](https://github.com/wildhart/meteor.jobs/issues/32)
+- Fixed: `Jobs.execute()` could resolve before the state write of a sync job function's un-awaited `this.success()` (or `failure`/`remove`/`reschedule`) had reached the database
 
 #### 2.1.0 (2026-10-10)
 All new behaviour is opt-in; existing apps upgrade without change. Thanks to [@harryadel](https://github.com/harryadel) for the features and the test suite.

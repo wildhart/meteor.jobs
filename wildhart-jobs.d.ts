@@ -44,6 +44,13 @@ declare module 'meteor/wildhart:jobs' {
              * longer than your longest job. See "Crash recovery" in the README.
              */
             maxExecutionTime: number;
+            /**
+             * Monti APM jobs dashboard integration, default `false`. `true` traces every job run and counts
+             * jobs added by `Jobs.run()`; an object additionally reports pending counts every `pendingInterval`
+             * ms from the server in control (0 = off). The `montiapm:agent` package must be in the app; it is
+             * found at run time, never a dependency. See "Monti APM" in the README.
+             */
+            monti?: boolean | {pendingInterval?: number; agent?: MontiLike};
         }
 
         /** A time span or point in time for the `in` / `on` / `retryIn` options, e.g. `{minutes: 5}` or `{hour: 9, minute: 0}`. */
@@ -192,6 +199,13 @@ declare module 'meteor/wildhart:jobs' {
          * See "Crash recovery" in the README.
          */
         function requeueExecuting(olderThan?: Date): Promise<number>;
+    }
+
+    /** The subset of the Monti APM agent (the `Monti` global) used by the `monti` option. Pass your own via `monti: {agent}` in tests. */
+    export interface MontiLike {
+        traceJob<T>(options: {name: string; waitTime?: number; data?: object}, fn: () => T): T;
+        recordNewJob(name: string): void;
+        recordPendingJobs(name: string, count: number): void;
     }
 
     /**

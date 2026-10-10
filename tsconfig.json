@@ -12,5 +12,5 @@
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "include": ["jobs.ts", "TypedJob.ts", "wildhart-jobs.d.ts", "meteor-3.d.ts"]
+  "include": ["jobs.ts", "TypedJob.ts", "monti.ts", "wildhart-jobs.d.ts", "meteor-3.d.ts"]
 }

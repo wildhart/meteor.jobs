@@ -1,5 +1,7 @@
-# Meteor Jobs
+# Meteor Jobs (Fibers / synchronous API)
 (inspired heavily by [msavin:sjobs](https://github.com/msavin/SteveJobs..meteor.jobs.scheduler.queue.background.tasks))
+
+This is the synchronous (Fibers) line of `wildhart:jobs`, for Meteor 1.3 to 2.x. On Meteor 3, or for the async API, use `wildhart:jobs` instead; see **[Which package do I want?](#which-package-do-i-want)** below.
 
 Run scheduled tasks with the simple jobs queue made just for Meteor. With tight MongoDB integration and fibers-based timing functions, this package is quick, reliable and effortless to use.
 
@@ -10,6 +12,19 @@ Run scheduled tasks with the simple jobs queue made just for Meteor. With tight 
  - No third party dependencies
 
 It can run hundreds of jobs in seconds with minimal CPU impact, making it a reasonable choice for many applications. To get started, check out the **[quick start guide](#quick-start)** and the **[full API documentation](#api-documentation)** below.
+
+## Which package do I want?
+
+This repository publishes two packages from one codebase:
+
+| Package | API | Meteor | Branch |
+|---|---|---|---|
+| `wildhart:jobs` | async (`await Jobs.run()`, async job functions) | 2.8.1 and later, including 3.x | `master` |
+| `wildhart:jobs-fibers` (this one) | synchronous, Fibers-based | 1.3 to 2.x | `fibers` |
+
+Both lines get the same features, with matching minor version numbers (1.2.x here is at feature parity with 2.2.x of `wildhart:jobs`). Use `wildhart:jobs-fibers` if your app runs on Meteor older than 2.8.1, or if it is on Meteor 2.x and you do not want to rewrite your job functions for the async API. On Meteor 3 you need [`wildhart:jobs`](https://github.com/wildhart/meteor.jobs/tree/master).
+
+**Already using `wildhart:jobs` 1.0.x?** Switch with `meteor remove wildhart:jobs` then `meteor add wildhart:jobs-fibers`, and change your imports from `meteor/wildhart:jobs` to `meteor/wildhart:jobs-fibers`. The exported `Jobs` and `TypedJob` globals, the API and the `jobs_data` collection are unchanged, so existing scheduled jobs carry over untouched.
 
 ## Coming from msavin:jobs?
 
@@ -24,11 +39,11 @@ Unfortunately I found the job queue system in `msavin:jobs` too fundamentally bu
 First, install the package, and import if necessary:
 
 ```bash
-meteor add wildhart:jobs
+meteor add wildhart:jobs-fibers
 ```
 
 ```javascript
-import { Jobs } from 'meteor/wildhart:jobs'
+import { Jobs } from 'meteor/wildhart:jobs-fibers'
 ```
 
 Then, write your background jobs like you would write your methods:
@@ -86,7 +101,7 @@ Benefits of the new API:
 
 With the new API, the above code would be replaced with:
 ```typescript
-import { TypedJob } from "meteor/wildhart:jobs";
+import { TypedJob } from "meteor/wildhart:jobs-fibers";
 
 export const sendReminderJob = new TypedJob('sendReminders', function(to: string, message: string) {
 	...
@@ -177,7 +192,10 @@ if (Meteor.isServer) {
  - [Jobs.collection](#jobscollection)
  - [Repeating Jobs](#repeating-jobs)
  - [Async Jobs/Promises](#async-jobs)
+ - [Crash recovery](#crash-recovery)
+ - [Monti APM](#monti-apm)
  - [Bulk Operations](#bulk-operations)
+ - [Running the tests](#running-the-tests)
  - [Version History](#version-history)
 
 ### Jobs.configure
@@ -196,6 +214,9 @@ Jobs.configure({
     // determine how to set the serverId - see below. (default = random string)
     setServerId: String || Function,
 
+    // this server never runs the job queue (default = false) - see "Dedicated jobs server" below.
+    dontRunJobs: Boolean,
+
     // determine if/how to log the package outputs (default = console.log)
     log: Boolean || Function,
 
@@ -204,11 +225,42 @@ Jobs.configure({
     autoStart: Boolean,
 
     // whether to mark successful just as successful, or remove them,
-    // otherwise you have to resolve every job with this.success() or this.remove()
-    defaultCompletion: 'success' | 'remove',
+    // otherwise you have to resolve every job with this.success() or this.remove().
+    // Pass null to return to the default.
+    defaultCompletion: 'success' | 'remove' | null,
+
+    // requeue jobs left 'executing' whenever a server takes control of the queue (default = false).
+    // Makes execution at-least-once, see "Crash recovery" below before enabling.
+    requeueOnTakeover: Boolean,
+
+    // (milliseconds) requeue jobs which have been 'executing' for longer than this,
+    // checked on every ping. 0 (default) = off. See "Crash recovery" below.
+    maxExecutionTime: Number,
+
+    // Monti APM jobs dashboard integration (default = false). true traces every job run,
+    // {pendingInterval: ms} additionally reports pending counts. See "Monti APM" below.
+    monti: Boolean || {pendingInterval: Number},
 })
 ```
 `setServerId` - In a **multi-server deployment**, jobs are only executed on one server.  Each server should have a unique ID so that it knows if it is control of the job queue or not. You can provide a function which returns a serverId from somewhere (e.g. from an environment variable) or just use the default of a random string.  In a **single-server deployment** set this to a static string so that the server knows that it is always in control and can take control more quickly after a reboot.
+
+#### Dedicated jobs server
+
+By default any server may take control of the job queue, so with several servers running the same code you cannot choose which one runs the jobs. To keep them on one or more **dedicated servers** (for example a box which handles no user connections, see [#30](https://github.com/wildhart/meteor.jobs/issues/30)), set `dontRunJobs: true` on every other server, typically from an environment variable:
+
+```javascript
+Jobs.configure({
+    dontRunJobs: !process.env.JOB_RUNNER,  // only the dedicated server(s) have JOB_RUNNER set
+    setServerId: process.env.JOB_RUNNER,   // optional: a static id lets a dedicated server resume control instantly after a restart
+});
+```
+
+* A server with `dontRunJobs` never takes control of the queue, even when the server in control goes quiet. If every dedicated server is down, jobs wait.
+* Several dedicated servers elect among themselves as usual: whichever takes control first runs the jobs and the others take over after `maxWait` if it goes quiet. Each one still needs its own unique `setServerId` (or the random default).
+* A server with `dontRunJobs` can still schedule jobs with `Jobs.run()`, pause and resume the queue with `Jobs.stop()` / `Jobs.start()`, and run a pending job on demand with `Jobs.execute()`, which runs the job function on the server which calls it.
+* The first deployment which introduces the option can leave the queue idle for up to `maxWait` if an older server was in control, until its last ping goes stale. After that a dedicated server with a static `setServerId` resumes control instantly when it restarts.
+
+If two servers are ever started with the same `setServerId`, both believe they are in control and every job runs twice. Since 1.2.0 the package detects this and logs a warning on each of them.
 
 ### Jobs.register
 
@@ -304,6 +356,16 @@ The configuration object supports the following inputs:
 	- If a job is marked as singular, it will only be scheduled if no other job is **pending** with the same arguments
 * **`awaitAsync`** - Boolean
 	- If an [async job](#asyncjobs) with run with `awaitAsync: true` is running, then no other job of the same name will start until the running job has completed.
+* **`jobId`** - String
+	- Use your own `_id` for the job document instead of a generated one. This makes scheduling idempotent: if a job with that id already exists (in any state), `Jobs.run()` logs `Job with this id already exists`, calls the `callback` with that error, and returns `false`, exactly like `unique` and `singular`. Useful when the id is derived from your own data (e.g. `"reminder-" + orderId`) so you can `Jobs.remove(id)` or `Jobs.reschedule(id, ...)` later without querying.
+	- "In any state" includes finished jobs: a job resolved with `this.success()` (or `defaultCompletion: 'success'`) keeps its id occupied until it is removed, so pair `jobId` with `this.remove()` or `defaultCompletion: 'remove'` if you want to schedule the same id again later. `Jobs.replicate()` of a job with a custom id gives the copy a generated id.
+	- Must be a non-empty string. Note that a trailing argument object which happens to contain a `jobId` key is now treated as the configuration object, as with every other configuration key.
+* **`retries`** - Number
+	- How many times to run the job again if its function throws (or its promise rejects). The default is 0: the job is marked `'failure'` on the first error. With `retries: 2` the job runs up to 3 times. An explicit `this.failure()` is never retried. Must be a non-negative integer.
+* **`retryIn`** - Object
+	- How long to wait before each retry, in the same format as `in` (e.g. `{minutes: 5}`). The default is to retry as soon as possible.
+	- The job document records how many times the current scheduling of the job has run in `attempts`, also available in the job function as `this.document.attempts`. `attempts` is recorded for every job, not only those with `retries`.
+	- Rescheduling a job with `this.reschedule()` or `Jobs.reschedule()` starts a new run cycle and resets `attempts`, so a [repeating job](#repeating-jobs) gets its full `retries` on every run. `Jobs.replicate()` copies `retries` and `retryIn` to the new job but not `attempts`.
 - **`callback`** - Function
 	- Run a callback function after scheduling the job
 
@@ -315,6 +377,15 @@ The configuration object supports the following inputs:
 Jobs.execute(doc) // or (doc._id)
 // or NEW API
 sendReminderJob.execute(doc); // or (doc._id)
+```
+
+It returns how the job was resolved: `'success'`, `'failure'`, `'reschedule'` or `'remove'` (including a resolution applied by `defaultCompletion`), or `false` if the job was not found or is not pending.
+
+For an [async job](#async-jobs) it returns as soon as the job function has been *started*, like the queue itself does, with the result `'executing'`. Pass `{awaitCompletion: true}` to wait until the job function has finished and the job's state has been resolved, which is what you usually want when executing a job from a method or a test. The wait uses `Promise.await`, so the caller must be inside a Fiber (a method, a publication, `Meteor.startup`, another job function):
+
+```javascript
+const result = Jobs.execute(doc, {awaitCompletion: true});
+if (result == 'failure') { /* ... */ }
 ```
 
 ### Jobs.reschedule
@@ -471,6 +542,44 @@ This defers the error message `'Job was not resolved with success, failure, resc
 * Other jobs of the same type will still run when scheduled while asynchronous jobs are executing, unless the running job was configured with `awaitSync: true`, in which case the pending job will wait until the previous job of that name has completed.
 * Asynchronous code may need to be wrapped in [`Meteor.bindEnvironment()`](https://guide.meteor.com/using-npm-packages.html#bind-environment).
 
+## Crash recovery
+
+A job is marked `'executing'` (with a `startedAt` date) just before its function runs. If the server in control of the queue crashes, is killed, or restarts while jobs are executing, those jobs stay `'executing'` forever and never run again. By default the package does nothing about this: a lost job is lost, and no job ever runs twice (at-most-once).
+
+Two opt-in settings in [`Jobs.configure()`](#jobsconfigure) change that trade-off to at-least-once:
+
+* **`requeueOnTakeover: true`** - whenever a server takes control of the queue (a fresh start, a restart of the server in control with a static `setServerId`, or a takeover after `maxWait`), every job still `'executing'` is returned to `'pending'` and runs again straight away. Since only the server in control executes jobs, such a job was normally started by a server which is gone.
+* **`maxExecutionTime`** (milliseconds) - on every ping, the server in control requeues jobs which started more than this long ago. This covers a job function which hangs (for example on a network call with no timeout) while its server stays alive. Keep it comfortably longer than your longest job.
+
+Before enabling either, make sure your job functions are safe to run more than once (idempotent, or checking your own data before acting). A requeued job runs its function **again from the start**, and the first run may have partly or fully completed:
+* The old server may have been stalled rather than dead (a long GC pause, a database outage longer than `maxWait`, a synchronous job blocking the event loop) and will finish its copy of the job after the takeover.
+* Jobs started with `Jobs.execute()` on a server which is **not** in control are also `'executing'` and are requeued by a takeover while they run.
+* A job which crashes the server itself (an uncaught exception outside the job's promise, running out of memory) is requeued on every restart and crashes the server again. Give such jobs a `retries` value: a requeued run counts as an attempt, and a job which has used all of its attempts is marked `'failure'` instead of being requeued, so the loop ends.
+
+You can also call `Jobs.requeueExecuting()` yourself, optionally with a `Date` to only requeue jobs started before it. It returns the number of jobs requeued. A single-server deployment can, for example, call it once from `Meteor.startup()` instead of enabling `requeueOnTakeover`.
+
+## Monti APM
+
+If your app uses [Monti APM](https://montiapm.com) (`montiapm:agent` 2.44 or later), the package can feed its [Jobs dashboard](https://docs.montiapm.com/dashboards/jobs-dashboard). It is opt-in:
+
+```javascript
+Jobs.configure({
+    monti: true,                             // trace every job run, count jobs added by Jobs.run()
+    // or
+    monti: {pendingInterval: 20 * 1000},     // ... and report the number of pending jobs every 20s
+});
+```
+
+`montiapm:agent` is **not** a dependency of this package. The agent is looked up at run time, so an app without it (or on any version of it) builds unchanged. If `monti` is set but the agent is not found, the package logs one warning and runs jobs without tracing.
+
+What you get:
+
+* Every job run is a **trace** named after the job (job names map 1:1 to Monti trace names, and Monti suggests keeping those to a few dozen). The trace's **delay** is `now - due`, i.e. how late the job started; it is 0 for a job run ahead of time with [`Jobs.execute()`](#jobsexecute). The trace's start data contains the job `_id` and its `arguments`. If arguments are sensitive, mask them with Monti's own `Monti.tracer.addFilter()`.
+* A run is **errored** only when the job function throws or returns a rejected promise. A job which calls `this.failure()` shows as a completed run. A job which reschedules itself shows as one run per execution.
+* **Added** counts every job inserted by `Jobs.run()`. Jobs refused by `unique` or `singular` are not counted.
+* **Pending** counts are off by default (Monti recommends it for performance reasons). With `pendingInterval`, the server in control of the queue reports the number of pending jobs for every registered job name, right after taking control and then every interval. Each report is one aggregation over the pending documents, which the package's `{name, due, state}` index cannot serve on its own; if your `jobs_data` collection is large, add a `{state: 1, name: 1}` index yourself before enabling it. Monti suggests an interval of 10 to 50 seconds.
+* A job run with `Jobs.execute()` from inside a Meteor method (or any other Monti trace) is folded into that trace rather than shown as a job. This is how the agent behaves and is not configurable here.
+
 ## Bulk Operations
 
 The job queue intelligently prevents lots of a single job dominating the job queue, so feel free to use this package to safely schedule bulk operations, e.g, sending 1000s of emails. Although it may take some time to send all of these emails, any other jobs which are scheduled to run while they are being sent will still be run on time.  Run each operation as its own job (e.g, 1000 separate `"sendSingleEmail"` jobs rather than a single `"send1000Emails"` job.  The job queue will run all 1000 `"sendSingleEmail"` jobs in sequence, but after each job it will check if any other jobs need to run first.
@@ -502,7 +611,43 @@ If any of these differences make this package unsuitable for you, please let me 
 
 ------
 
+## Running the tests
+
+The package has a `meteor test-packages` suite in `tests/`. From the package directory, after `npm install` (dev dependencies only, nothing is shipped):
+
+```sh
+npm test            # run the suite once
+npm run test:watch  # keep the test app running and re-run on file changes
+npm run check       # type-check jobs.ts, TypedJob.ts and monti.ts with tsc
+```
+
+`npm test` runs:
+
+```sh
+TEST_CLIENT=0 meteor --release METEOR@2.16 test-packages ./ --port 3100 --once --driver-package meteortesting:mocha
+```
+
+`TEST_CLIENT=0` skips the client run, which has nothing to test (the script uses `cross-env` so this works in any shell; on Windows cmd by hand it is `set TEST_CLIENT=0 && meteor ...`). Keep `--port` whenever another Meteor app is running on the default ports: the test app would otherwise share that app's MongoDB on port 3001 and the two would pick up each other's jobs. The suite runs on the last Meteor 2.x release; pass a different `--release` to test an older one.
+
+------
+
 ## Version History
+
+#### 1.2.0 (2026-10-11)
+First release as `wildhart:jobs-fibers`, the synchronous (Fibers) line of this package for Meteor 1.3 to 2.x; see the note at the top of this README. There was no 1.1.0: minor versions now track the `wildhart:jobs` 2.x line, so 1.2.x has the features of both 2.1.x and 2.2.x, in synchronous form. All new behaviour is opt-in; existing 1.0.18 apps upgrade without change apart from the package name. Thanks to [@harryadel](https://github.com/harryadel) for the 2.1.0 features and the test suite this port is based on.
+- `Jobs.execute()` returns how the job was resolved (`'success'`, `'failure'`, `'reschedule'`, `'remove'`), `'executing'` for an async job still running, or `false` if the job was not found or not pending (previously `undefined`)
+- `Jobs.execute(job, {awaitCompletion: true})` waits for an async job function to finish before returning (`Promise.await`, so call it from a Fiber)
+- `Jobs.run()` accepts a `jobId` config option to choose the job document's `_id`; a duplicate id returns `false` like `unique`/`singular`
+- `Jobs.run()` accepts `retries` and `retryIn` to rerun a job whose function throws. Rescheduling a job starts a new run cycle, so repeating jobs get their full `retries` each time
+- Crash recovery (opt-in, see "Crash recovery"): `requeueOnTakeover` requeues jobs left `'executing'` by a crashed or restarted server when a server takes control; `maxExecutionTime` requeues jobs executing for too long; `Jobs.requeueExecuting()` does the same on demand
+- New job document fields: `attempts` on every job (runs of the current scheduling, reset by a reschedule) and `startedAt` while a job is executing
+- Note: a trailing argument object containing a `jobId`, `retries` or `retryIn` key is now recognised as the config object, as with every other config key
+- `Jobs.configure({defaultCompletion: null})` returns to the default
+- Opt-in [Monti APM](#monti-apm) jobs dashboard integration: `Jobs.configure({monti: true})` traces every job run and counts added jobs, `{monti: {pendingInterval}}` also reports pending counts. The agent is found at run time, so `montiapm:agent` is not a dependency. Requested in [#32](https://github.com/wildhart/meteor.jobs/issues/32)
+- `Jobs.configure({dontRunJobs: true})` keeps a server from ever running the job queue, so jobs can be kept on dedicated servers (see "Dedicated jobs server"). Requested in [#30](https://github.com/wildhart/meteor.jobs/issues/30)
+- A warning is logged when two servers are running with the same `setServerId` (both would run every job)
+- Fixed: an overdue job produced a negative timer value (Node warned and clamped it to 1 ms)
+- Package test suite (`npm test`, see "Running the tests") and JSDoc on the public types
 
 #### 1.0.18 (2023-08-19)
 - Added new [strongly-typed API](#new-strongly-typed-api).

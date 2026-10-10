@@ -1,4 +1,5 @@
 import _TypedJob from "./TypedJob";
+import * as Monti from "./monti";
 
 export const TypedJob = _TypedJob;
 export type JobOrId = string | false | null | {_id: string};
@@ -8,10 +9,53 @@ const settings: Jobs.Config = {
 	maxWait: 5 * 60 * 1000, // specify how long the server could be inactive before another server takes on the master role  (default=5 min)
 	log: console.log,
 	autoStart: true,
+	requeueOnTakeover: false, // requeue jobs left 'executing' whenever this server takes control of the queue (see README "Crash recovery")
+	maxExecutionTime: 0, // (ms) requeue jobs which have been 'executing' longer than this, checked on every ping; 0 = off
+	dontRunJobs: false, // #30 this server never takes control of the job queue (see README "Dedicated jobs server")
+	monti: false, // Monti APM jobs dashboard integration (see README "Monti APM")
 };
 
 function log(...args: any) {
 	typeof settings.log == 'function' && settings.log(...args);
+}
+
+// used by Jobs.run/replicate/reschedule and by the Queue retry path; kept off the Jobs namespace so it is not exposed to apps
+function getDateFromConfig(config: Partial<Jobs.JobConfig>) {
+	// https://github.com/msavin/SteveJobs..meteor.jobs.scheduler.queue.background.tasks/blob/031fdf5051b2f2581a47f64ab5b54ffbb6893cf8/package/server/imports/utilities/helpers/date.js
+	check(config, Match.ObjectIncluding({
+		date: Match.Maybe(Date),
+		in: Match.Maybe(Object),
+		on: Match.Maybe(Object),
+	}));
+
+	let currentDate = config.date || new Date();
+	let newNumber: number;
+	let fn: string;
+
+	Object.keys(config).forEach(key1 => {
+		if (["in", "on"].indexOf(key1) > -1) {
+			Object.keys(config[key1]).forEach(key2 => {
+				try {
+					newNumber = Number(config[key1][key2]);
+					if (isNaN(newNumber)) {
+						console.warn('Jobs', `invalid type was input: {key1}.{key2}`, newNumber)
+					} else {
+						// convert month(s) => months (etc), and day(s) => date and year(s) => fullYear
+						fn = (key2 + "s").replace('ss', 's').replace('days','date').replace('years','fullYear').replace('months','month');
+						// convert months => Months
+						fn = fn.charAt(0).toUpperCase() + fn.slice(1);
+						// if key1=='in' currentDate.setMonth(newNumber + currentDate.getMonth())
+						// if key1=='on' currentDate.setMonth(newNumber)
+						currentDate['set' + fn](newNumber + (key1 == 'in' ? currentDate['get' + fn]() : 0));
+					}
+				} catch (e) {
+					console.warn('Jobs', `invalid argument was ignored: {key1}.{key2}`, newNumber, fn);
+					console.log(e);
+				}
+			});
+		}
+	});
+	return currentDate;
 }
 
 /********************************* Dominator *********************/
@@ -21,6 +65,7 @@ namespace Dominator {
 	interface Document {
 		_id?: string,
 		serverId?: string | null,
+		instance?: string, // random per process, see _instanceId
 		pausedJobs: string[],
 		date?: Date,
 	}
@@ -32,6 +77,9 @@ namespace Dominator {
 	let _serverId: string | undefined | null = null;
 	let _pingInterval: number | null =  null;
 	let _takeControlTimeout: number | null = null;
+	// identifies this process within its serverId, so two servers configured with the same serverId can be detected
+	const _instanceId = Random.id();
+	let _warnedDuplicateServerId = false;
 
 	Meteor.startup(() => {
 		log('Jobs', `Meteor.startup, startupDelay: ${settings.startupDelay / 1000}s...`);
@@ -43,6 +91,11 @@ namespace Dominator {
 		_serverId = (typeof settings.setServerId == 'string' && settings.setServerId)
 			|| (typeof settings.setServerId == 'function' && settings.setServerId())
 			|| Random.id();
+
+		if (settings.dontRunJobs) {
+			// #30 the option is an explicit opt-in, so an ordinary log line is enough to confirm it at start-up
+			log('Jobs', `dontRunJobs is set, so this server (${_serverId}) will not run the job queue`);
+		}
 
 		collection.find({_id: DOMINATOR_ID}).observe({
 			changed: (newPing) => _observer(newPing),
@@ -95,6 +148,12 @@ namespace Dominator {
 
 	function _observer(newPing: Document) {
 		log('Jobs', 'dominator.observer', newPing);
+		if (newPing.serverId == _serverId && newPing.instance && newPing.instance != _instanceId && !_warnedDuplicateServerId) {
+			// both servers believe they are in control and every job would run twice; nothing here can tell which one
+			// should back off, so make the misconfiguration loud and leave it to the app
+			_warnedDuplicateServerId = true;
+			console.warn('Jobs', `another server is using the same serverId '${_serverId}': jobs will run on both. Give every server a unique setServerId, or set dontRunJobs on the ones which should not run jobs.`);
+		}
 		if (lastPing && lastPing.serverId == _serverId && newPing.serverId != _serverId) {
 			// we were in control but another server has taken control
 			_relinquishControl();
@@ -110,7 +169,7 @@ namespace Dominator {
 			Meteor.clearTimeout(_takeControlTimeout);
 			_takeControlTimeout = null;
 		}
-		if (lastPing.serverId != _serverId) {
+		if (lastPing.serverId != _serverId && !settings.dontRunJobs) {
 			// we're not in control, set a timer to take control in the future...
 			_takeControlTimeout = Meteor.setTimeout(() => {
 				// if this timeout isn't cleared then the dominator hasn't been updated recently so we should take control.
@@ -120,8 +179,19 @@ namespace Dominator {
 	}
 
 	function _takeControl(reason: string) {
+		if (settings.dontRunJobs) {
+			// #30 every start-up path and takeover comes through here, so this is the one place the rule is enforced
+			log('Jobs', 'takeControl refused: dontRunJobs is set', reason);
+			return;
+		}
 		log('Jobs', 'takeControl', reason);
 		_ping();
+		if (settings.requeueOnTakeover) {
+			// only the server in control executes jobs, so anything still 'executing' now was normally
+			// started by a server which has since died or restarted. Opt-in: it makes execution at-least-once.
+			Jobs.requeueExecuting();
+		}
+		Monti.setControlling(true);
 		Queue.start();
 	}
 
@@ -131,6 +201,7 @@ namespace Dominator {
 			Meteor.clearInterval(_pingInterval);
 			_pingInterval = null;
 		}
+		Monti.setControlling(false);
 		Queue.stop();
 	}
 
@@ -140,6 +211,7 @@ namespace Dominator {
 		}
 		const newPing: Document = {
 			serverId: _serverId,
+			instance: _instanceId,
 			pausedJobs: lastPing ? (lastPing.pausedJobs || []) : (settings.autoStart ? [] : ['*']),
 			date: new Date(),
 		};
@@ -148,6 +220,9 @@ namespace Dominator {
 		}
 		collection.upsert({_id: DOMINATOR_ID}, newPing);
 		log('Jobs', 'ping', newPing.date, 'paused:', newPing.pausedJobs);
+		if (settings.maxExecutionTime > 0) {
+			Jobs.requeueExecuting(new Date(Date.now() - settings.maxExecutionTime));
+		}
 	}
 }
 
@@ -161,7 +236,11 @@ export namespace Jobs {
 		log: typeof console.log | boolean;
 		autoStart: boolean;
 		setServerId?: string | Function;
-		defaultCompletion?: 'success' | 'remove';
+		defaultCompletion?: 'success' | 'remove' | null;
+		requeueOnTakeover: boolean;
+		maxExecutionTime: number;
+		dontRunJobs: boolean;
+		monti?: Monti.MontiConfig;
 	}
 
 	export interface JobConfig {
@@ -173,6 +252,9 @@ export namespace Jobs {
 		awaitAsync: boolean;
 		unique: boolean;
 		singular: boolean;
+		jobId: string;
+		retries: number;
+		retryIn: any;
 		callback?: Function;
 	}
 
@@ -187,6 +269,10 @@ export namespace Jobs {
 		priority: number,
 		created: Date,
 		awaitAsync?: boolean,
+		attempts?: number,
+		retries?: number,
+		retryIn?: any,
+		startedAt?: Date,
 	}
 
 	export interface JobThisType {
@@ -206,7 +292,15 @@ export namespace Jobs {
 
 	export const collection = new Mongo.Collection<JobDocument>("jobs_data");
 
-	collection._ensureIndex({name: 1, due: 1, state: 1});
+	// Create the indexes - called when the package loads, exported so an app can call it again if it drops them
+	export function createIndexes() {
+		collection._ensureIndex({name: 1, due: 1, state: 1});
+		// for requeueExecuting(), which otherwise scans the whole collection on every ping when maxExecutionTime is set.
+		// Partial, so it only holds the (few) executing jobs.
+		collection._ensureIndex({state: 1, startedAt: 1}, {partialFilterExpression: {state: 'executing'}});
+	}
+
+	createIndexes();
 
 	export function configure(config: Partial<Config>) {
 		check(config, {
@@ -214,12 +308,23 @@ export namespace Jobs {
 			setServerId: Match.Maybe(Match.OneOf(String, Function)),
 			log: Match.Maybe(Match.OneOf(undefined, null, Boolean, Function)),
 			autoStart: Match.Maybe(Boolean),
-			defaultCompletion: Match.Maybe(Match.Where((val => /^(success|remove)$/.test(val)))),
+			// null returns to the default (unset); check() validates an explicit undefined against the inner pattern, so allow null instead
+			defaultCompletion: Match.Maybe(Match.OneOf(null, Match.Where((val => /^(success|remove)$/.test(val))))),
 			startupDelay: Match.Maybe(Number),
+			requeueOnTakeover: Match.Maybe(Boolean),
+			maxExecutionTime: Match.Maybe(Number),
+			dontRunJobs: Match.Maybe(Boolean),
+			monti: Match.Maybe(Match.OneOf(Boolean, {
+				pendingInterval: Match.Maybe(Number),
+				agent: Match.Maybe(Match.Where((agent: any) => !!agent && ['traceJob', 'recordNewJob', 'recordPendingJobs'].every(fn => typeof agent[fn] == 'function'))),
+			})),
 		});
 		Object.assign(settings, config);
 		if (settings.log === true) {
 			settings.log = console.log;
+		}
+		if ('monti' in config) {
+			Monti.configure(settings.monti, {collection, jobNames: () => Object.keys(jobs)});
 		}
 		log('Jobs', 'Jobs.configure', Object.keys(config));
 	}
@@ -230,7 +335,7 @@ export namespace Jobs {
 		// log('Jobs', 'Jobs.register', Object.keys(jobs).length, Object.keys(newJobs).join(', '));
 	}
 
-	const configItems: Array<keyof JobConfig> = ['in', 'on', 'priority', 'date', 'callback', 'singular', 'unique', 'awaitAsync']
+	const configItems: Array<keyof JobConfig> = ['in', 'on', 'priority', 'date', 'callback', 'singular', 'unique', 'awaitAsync', 'jobId', 'retries', 'retryIn']
 
 	const isConfig = (input: any) => !!(input && typeof input == 'object' && configItems.some(i => typeof input[i] != 'undefined'));
 
@@ -242,6 +347,14 @@ export namespace Jobs {
 		if (config && !isConfig(config)) {
 			args.push(config);
 			config = null;
+		}
+		if (config?.jobId !== undefined) {
+			// validate before the unique/singular queries below so a bad id fails fast
+			check(config.jobId, Match.Where((id: any) => typeof id == 'string' && id.length > 0));
+		}
+		if (config?.retries !== undefined) {
+			check(config.retries, Match.Where((n: any) => Number.isInteger(n) && n >= 0));
+			check(config.retryIn, Match.Maybe(Object));
 		}
 		var error;
 		if (config?.unique) { // If a job is marked as unique, it will only be scheduled if no other job exists with the same arguments
@@ -265,10 +378,30 @@ export namespace Jobs {
 			priority: config?.priority || 0,
 			created: new Date(),
 			awaitAsync: config?.awaitAsync || undefined,
+			retries: config?.retries || undefined,
+			retryIn: config?.retries && config.retryIn || undefined,
 		};
-		const jobId = collection.insert(jobDoc);
+		if (config?.jobId !== undefined) {
+			// caller-chosen id, so a job can be enqueued idempotently and looked up without a query
+			jobDoc._id = config.jobId;
+		}
+		let jobId: string | undefined;
+		try {
+			jobId = collection.insert(jobDoc);
+		} catch (e) {
+			if (config?.jobId && isDuplicateKeyError(e)) {
+				error = 'Job with this id already exists';
+				log('Jobs', '  ' + error, config.jobId);
+				if (typeof config?.callback == 'function') {
+					config.callback(error, null);
+				}
+				return false;
+			}
+			throw e;
+		}
 		if (jobId) {
 			jobDoc._id = jobId;
+			Monti.recordNewJob(name); // not on the unique/singular refusal paths above
 		} else {
 			error = true;
 		}
@@ -279,7 +412,16 @@ export namespace Jobs {
 		return error ? false : jobDoc as JobDocument;
 	}
 
-	export function execute(jobOrId: JobOrId) {
+	export interface ExecuteOptions {
+		// return only once the job function has finished, including async job functions (uses Promise.await, so
+		// the caller must be inside a Fiber: a method, a publication, Meteor.startup, a job function, ...)
+		awaitCompletion?: boolean;
+	}
+
+	// how a job was resolved, or 'executing' for an async job which is still running (no awaitCompletion)
+	export type ExecuteResult = 'success' | 'failure' | 'reschedule' | 'remove' | 'executing';
+
+	export function execute(jobOrId: JobOrId, options?: ExecuteOptions): ExecuteResult | false {
 		if (!jobOrId) {
 			console.warn('Jobs', '    Jobs.execute', 'JOB NOT FOUND', jobOrId);
 			return false;
@@ -290,14 +432,14 @@ export namespace Jobs {
 		const job = collection.findOne(jobId);
 		if (!job) {
 			console.warn('Jobs', 'Jobs.execute', 'JOB NOT FOUND', jobId);
-			return;
+			return false;
 		}
 		if (job.state != 'pending') {
 			console.warn('Jobs', 'Jobs.execute', 'JOB IS NOT PENDING', job);
-			return;
+			return false;
 		}
 
-		Queue.executeJob(job);
+		return Queue.executeJob(job, options);
 	}
 
 	export function replicate(jobOrId: JobOrId, config: Partial<JobConfig>) {
@@ -315,6 +457,8 @@ export namespace Jobs {
 		}
 
 		delete (job as any)._id;
+		delete job.attempts; // the copy keeps `retries`/`retryIn` but starts its own run cycle
+		delete job.startedAt;
 		job.due = date;
 		job.state = 'pending';
 		const newJobId = collection.insert(job);
@@ -334,7 +478,8 @@ export namespace Jobs {
 		if (config.priority) {
 			set.priority = config.priority;
 		}
-		const count = collection.update({_id: jobId}, {$set: set});
+		// a reschedule starts a new run cycle, so the job gets its full `retries` again (see Queue.executeJob)
+		const count = collection.update({_id: jobId}, {$set: set, $unset: {attempts: ''}});
 		log('Jobs', '    Jobs.reschedule', jobId, config, date, count);
 		if (typeof config.callback == 'function') {
 			config.callback(count==0, count);
@@ -408,42 +553,42 @@ export namespace Jobs {
 	export const start = Dominator.start;
 	export const stop = Dominator.stop;
 
-	function getDateFromConfig(config: Partial<Jobs.JobConfig>) {
-		// https://github.com/msavin/SteveJobs..meteor.jobs.scheduler.queue.background.tasks/blob/031fdf5051b2f2581a47f64ab5b54ffbb6893cf8/package/server/imports/utilities/helpers/date.js
-		check(config, Match.ObjectIncluding({
-			date: Match.Maybe(Date),
-			in: Match.Maybe(Object),
-			on: Match.Maybe(Object),
-		}));
+	function isDuplicateKeyError(e: any) {
+		return e?.code == 11000 || /duplicate key/i.test(e?.message || '');
+	}
 
-		let currentDate = config.date || new Date();
-		let newNumber: number;
-		let fn: string;
-
-		Object.keys(config).forEach(key1 => {
-			if (["in", "on"].indexOf(key1) > -1) {
-				Object.keys(config[key1]).forEach(key2 => {
-					try {
-						newNumber = Number(config[key1][key2]);
-						if (isNaN(newNumber)) {
-							console.warn('Jobs', `invalid type was input: {key1}.{key2}`, newNumber)
-						} else {
-							// convert month(s) => months (etc), and day(s) => date and year(s) => fullYear
-							fn = (key2 + "s").replace('ss', 's').replace('days','date').replace('years','fullYear').replace('months','month');
-							// convert months => Months
-							fn = fn.charAt(0).toUpperCase() + fn.slice(1);
-							// if key1=='in' currentDate.setMonth(newNumber + currentDate.getMonth())
-							// if key1=='on' currentDate.setMonth(newNumber)
-							currentDate['set' + fn](newNumber + (key1 == 'in' ? currentDate['get' + fn]() : 0));
-						}
-					} catch (e) {
-						console.warn('Jobs', `invalid argument was ignored: {key1}.{key2}`, newNumber, fn);
-						console.log(e);
-					}
-				});
-			}
-		});
-		return currentDate;
+	/**
+	 * Return 'executing' jobs to 'pending' so they run again. Called automatically when a server takes
+	 * control of the queue if `requeueOnTakeover` is set (the previous server died or restarted mid-job)
+	 * and, when `maxExecutionTime` is configured, on every ping for jobs started before `olderThan`.
+	 * Jobs are rerun from scratch, so job functions should be safe to run more than once.
+	 * A job with `retries` which has already used all its attempts (it crashed the server on its last
+	 * allowed run) is marked 'failure' instead, so a job which keeps crashing the server does not loop forever.
+	 */
+	export function requeueExecuting(olderThan?: Date) {
+		const query: Mongo.Query<JobDocument> = {state: 'executing'};
+		if (olderThan) {
+			query.startedAt = {$lte: olderThan};
+		}
+		// compared in JS rather than with a $expr query, which needs MongoDB 3.6; executing jobs are few
+		const spent = collection.find({...query, retries: {$exists: true}}, {fields: {attempts: 1, retries: 1}}).fetch()
+			.filter(job => (job.attempts || 0) > job.retries!)
+			.map(job => job._id);
+		if (spent.length) {
+			const failed = collection.update({_id: {$in: spent}}, {
+				$set: {state: 'failure'},
+				$unset: {startedAt: ''},
+			}, {multi: true});
+			log('Jobs', 'requeueExecuting', 'marked failed, no attempts left:', failed);
+		}
+		const count = collection.update(query, {
+			$set: {state: 'pending'},
+			$unset: {startedAt: ''},
+		}, {multi: true});
+		if (count) {
+			log('Jobs', 'requeueExecuting', count, olderThan || 'all');
+		}
+		return count;
 	}
 }
 
@@ -508,7 +653,8 @@ namespace Queue {
 
 		if (nextJob) {
 			// cap timeout limit to 24 hours to avoid Node.js limit https://github.com/wildhart/meteor.jobs/issues/5
-			let msTillNextJob = Math.min(MAX_TIMEOUT_MS, (nextJob.due.valueOf() - Date.now()) );
+			// and floor at 0: an overdue job would otherwise give Node a negative timeout (it warns and clamps to 1ms)
+			let msTillNextJob = Math.max(0, Math.min(MAX_TIMEOUT_MS, nextJob.due.valueOf() - Date.now()));
 
 			_timeout = nextJob && !_executing ? Meteor.setTimeout(()=> {
 				_timeout = null;
@@ -567,16 +713,16 @@ namespace Queue {
 		start();
 	}
 
-	export function executeJob(job: Jobs.JobDocument) {
+	export function executeJob(job: Jobs.JobDocument, {awaitCompletion = false}: Jobs.ExecuteOptions = {}): Jobs.ExecuteResult {
 		log('Jobs', '  ' + job.name);
 
 		if (typeof Jobs.jobs[job.name] == 'undefined') {
 			console.warn('Jobs', 'job does not exist:', job.name);
 			setJobState(job._id, 'failure');
-			return;
+			return 'failure';
 		}
 
-		let action: Jobs.JobStatus | 'reschedule' | 'remove' | null = null;
+		let action: Jobs.ExecuteResult | null = null;
 
 		const self: Jobs.JobThisType = {
 			document: job,
@@ -601,40 +747,67 @@ namespace Queue {
 			},
 		};
 
-		function completed() {
+		// apply defaultCompletion if the job did not resolve itself, and report how the job was resolved
+		function completed(): Jobs.ExecuteResult {
 			if (!action) {
 				if (settings.defaultCompletion == 'success') {
-					setJobState(job._id, 'success');
+					action = 'success';
+					setJobState(job._id, action);
 				} else if (settings.defaultCompletion == 'remove') {
+					action = 'remove';
 					Jobs.remove(job._id);
 				} else {
 					console.warn('Jobs', "Job was not resolved with success, failure, reschedule or remove. Consider using the 'defaultCompletion' option.", job);
-					setJobState(job._id, 'failure');
+					action = 'failure';
+					setJobState(job._id, action);
 				}
+			}
+			return action;
+		}
+
+		// retry a job whose function threw (or rejected) if it has retries left, otherwise mark it failed
+		function failed() {
+			if (action == 'reschedule') {
+				return;
+			}
+			const attempts = job.attempts || 0;
+			if (job.retries && attempts <= job.retries) {
+				log('Jobs', '    retrying', job.name, 'attempt', attempts, 'of', job.retries + 1);
+				action = 'reschedule';
+				// not Jobs.reschedule(): that resets `attempts`, because a reschedule by the job or the app starts a new run cycle
+				const due = getDateFromConfig({in: job.retryIn || {}});
+				Jobs.collection.update({_id: job._id}, {$set: {state: 'pending', due}});
+			} else {
+				self.failure();
 			}
 		}
 
-		let isAsync = false;
+		// set for an async job function: settles once it has finished and its state is resolved;
+		// the queue does not wait for it (async jobs run concurrently) but Jobs.execute can.
+		let completion: Promise<Jobs.ExecuteResult> | null = null;
 
 		try {
-			setJobState(job._id, 'executing');
-			const res = Jobs.jobs[job.name].apply(self, job.arguments);
+			// `attempts` counts the runs of the current scheduling of the job (reset by Jobs.reschedule)
+			Jobs.collection.update({_id: job._id}, {$set: {state: 'executing', startedAt: new Date()}, $inc: {attempts: 1}});
+			job.attempts = (job.attempts || 0) + 1;
+			// Monti.trace() returns the job function's result (or runs it directly when monti is off), so
+			// the promise detection and completion handling below are the same either way
+			const res: any = Monti.trace(job, () => Jobs.jobs[job.name].apply(self, job.arguments));
 			if (res?.then) {
-				isAsync = true
 				if (job.awaitAsync) {
 					_awaitAsyncJobs.add(job.name);
 				}
-				res.then(() => {
+				// Meteor's Promise runs these callbacks inside a Fiber, so the synchronous collection calls work
+				completion = res.then(() => {
 					log('Jobs', '    Done async job', job.name, 'result:', action);
 					_awaitAsyncJobs.delete(job.name);
-					completed();
-				}).catch(e => {
+					return completed();
+				}).catch((e: any) => {
 					console.warn('Jobs', '    Error in async job', job);
 					console.warn(e);
 					_awaitAsyncJobs.delete(job.name);
-					if (action != 'reschedule') {
-						self.failure();
-					}
+					failed();
+					return action ?? 'failure';
 				});
 			} else {
 				log('Jobs', '    Done job', job.name, 'result:', action);
@@ -642,14 +815,12 @@ namespace Queue {
 		} catch(e) {
 			console.warn('Jobs', 'Error in job', job);
 			console.warn(e);
-			if (action != 'reschedule') {
-				self.failure();
-			}
+			failed();
 		}
 
-		if (!isAsync) {
-			completed();
-		}
+		return !completion ? completed()
+			: awaitCompletion ? (Promise as any).await(completion) as Jobs.ExecuteResult
+			: 'executing';
 	}
 
 	function setJobState(jobId: string, state: Jobs.JobStatus) {

@@ -17,7 +17,7 @@ export default class TypedJob<TArgs extends any[]> {
 
 	public remove = (jobOrId: JobOrId) => Jobs.remove(jobOrId);
 
-	public execute = (jobOrId: JobOrId) => Jobs.execute(jobOrId);
+	public execute = (jobOrId: JobOrId, options?: Jobs.ExecuteOptions) => Jobs.execute(jobOrId, options);
 
 	public reschedule = (jobOrId: JobOrId, config: Partial<Jobs.JobConfig>) => Jobs.reschedule(jobOrId, config);
 

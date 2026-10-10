@@ -1,0 +1,5 @@
+# dev tooling only, keep it out of the published package and the test app build
+node_modules/
+package.json
+package-lock.json
+tsconfig.json

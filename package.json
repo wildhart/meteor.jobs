@@ -1,0 +1,15 @@
+{
+  "name": "wildhart-jobs-fibers-dev",
+  "private": true,
+  "description": "Development tooling only. wildhart:jobs-fibers is a Meteor (Atmosphere) package, declared in package.js; this file provides the test script and the types the editor needs. Nothing here is shipped.",
+  "scripts": {
+    "test": "cross-env TEST_CLIENT=0 meteor --release METEOR@2.16 test-packages ./ --port 3100 --once --driver-package meteortesting:mocha",
+    "test:watch": "cross-env TEST_CLIENT=0 meteor --release METEOR@2.16 test-packages ./ --port 3100 --driver-package meteortesting:mocha",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/meteor": "^2.9.11",
+    "cross-env": "^7.0.3",
+    "typescript": "^5.9.0"
+  }
+}

@@ -1,6 +1,6 @@
 Package.describe({
 	name: 'wildhart:jobs-fibers',
-	version: '1.2.0',
+	version: '1.2.1',
 	summary: 'Schedule jobs to run later, multi-server, super efficient (sync/Fibers API for Meteor 1.3 - 2.x)',
 	git: 'https://github.com/wildhart/meteor.jobs',
 	documentation: 'README.md'

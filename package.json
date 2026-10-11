@@ -5,7 +5,8 @@
   "scripts": {
     "test": "cross-env TEST_CLIENT=0 meteor --release METEOR@2.16 test-packages ./ --port 3100 --once --driver-package meteortesting:mocha",
     "test:watch": "cross-env TEST_CLIENT=0 meteor --release METEOR@2.16 test-packages ./ --port 3100 --driver-package meteortesting:mocha",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "publish": "cross-env meteor --release METEOR@2.16 publish"
   },
   "devDependencies": {
     "@types/meteor": "^2.9.11",

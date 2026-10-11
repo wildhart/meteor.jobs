@@ -560,7 +560,7 @@ You can also call `Jobs.requeueExecuting()` yourself, optionally with a `Date` t
 
 ## Monti APM
 
-If your app uses [Monti APM](https://montiapm.com) (`montiapm:agent` 2.44 or later), the package can feed its [Jobs dashboard](https://docs.montiapm.com/dashboards/jobs-dashboard). It is opt-in:
+If your app uses [Monti APM](https://montiapm.com) (`montiapm:agent` 2.50 or later), the package can feed its [Jobs dashboard](https://docs.montiapm.com/dashboards/jobs-dashboard). It is opt-in:
 
 ```javascript
 Jobs.configure({
@@ -570,7 +570,7 @@ Jobs.configure({
 });
 ```
 
-`montiapm:agent` is **not** a dependency of this package. The agent is looked up at run time, so an app without it (or on any version of it) builds unchanged. If `monti` is set but the agent is not found, the package logs one warning and runs jobs without tracing.
+`montiapm:agent` is **not** a dependency of this package. The agent is looked up at run time, so an app without it (or on any version of it) builds unchanged. If `monti` is set but the agent is not found, or is older than 2.50 (no jobs API), the package logs one warning and runs jobs without tracing.
 
 What you get:
 
@@ -632,6 +632,9 @@ TEST_CLIENT=0 meteor --release METEOR@2.16 test-packages ./ --port 3100 --once -
 ------
 
 ## Version History
+
+#### 1.2.1 (2026-10-11)
+- Detect old MontiAPM agent, show min required version is 2.50.
 
 #### 1.2.0 (2026-10-11)
 First release as `wildhart:jobs-fibers`, the synchronous (Fibers) line of this package for Meteor 1.3 to 2.x; see the note at the top of this README. There was no 1.1.0: minor versions now track the `wildhart:jobs` 2.x line, so 1.2.x has the features of both 2.1.x and 2.2.x, in synchronous form. All new behaviour is opt-in; existing 1.0.18 apps upgrade without change apart from the package name. Thanks to [@harryadel](https://github.com/harryadel) for the 2.1.0 features and the test suite this port is based on.

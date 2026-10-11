@@ -163,6 +163,31 @@ describe('Monti APM integration', function () {
 		assert.deepStrictEqual(monti.calls.trace, []);
 	});
 
+	it('warns that the agent is too old when montiapm:agent has no jobs API', () => {
+		const warnings = [];
+		const warn = console.warn;
+		const hadAgent = 'montiapm:agent' in Package;
+		const oldAgent = Package['montiapm:agent'];
+		Package['montiapm:agent'] = { Monti: {} }; // like montiapm:agent < 2.50
+		console.warn = (...args) => warnings.push(args);
+		try {
+			Jobs.configure({ monti: true });
+		} finally {
+			console.warn = warn;
+			if (hadAgent) {
+				Package['montiapm:agent'] = oldAgent;
+			} else {
+				delete Package['montiapm:agent'];
+			}
+		}
+		assert.strictEqual(warnings.length, 1, JSON.stringify(warnings));
+		assert.ok(warnings[0].join(' ').includes('2.50'));
+		const job = Jobs.run('monti.sync', 'oldagent');
+		Jobs.execute(job._id);
+		assert.strictEqual(doc(job._id).state, 'success');
+		assert.deepStrictEqual(monti.calls.trace, []);
+	});
+
 	it('rejects an agent without the expected functions', () => {
 		assert.throws(() => Jobs.configure({ monti: { agent: { traceJob() {} } } }), /Match error/);
 		assert.throws(() => Jobs.configure({ monti: 'yes' }), /Match error/);

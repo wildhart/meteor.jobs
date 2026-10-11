@@ -45,6 +45,8 @@ export function configure(option: MontiConfig | undefined, newDeps: Deps) {
 		if (found && typeof found.traceJob == 'function') {
 			agent = found;
 			pendingInterval = options.pendingInterval || 0;
+		} else if (found) {
+			console.warn('Jobs', 'monti is configured but this version of the Monti APM agent has no jobs API (needs montiapm:agent 2.50 or later); jobs will run without tracing');
 		} else {
 			console.warn('Jobs', 'monti is configured but the Monti APM agent (montiapm:agent) was not found; jobs will run without tracing');
 		}

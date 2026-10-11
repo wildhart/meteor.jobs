@@ -650,7 +650,7 @@ You can also call `Jobs.requeueExecuting()` yourself, optionally with a `Date` t
 
 ## Monti APM
 
-If your app uses [Monti APM](https://montiapm.com) (`montiapm:agent` 2.44 or later, or the Meteor 3 agent), the package can feed its [Jobs dashboard](https://docs.montiapm.com/dashboards/jobs-dashboard). It is opt-in:
+If your app uses [Monti APM](https://montiapm.com) (`montiapm:agent` 2.50 or later, or the Meteor 3 agent), the package can feed its [Jobs dashboard](https://docs.montiapm.com/dashboards/jobs-dashboard). It is opt-in:
 
 ```javascript
 Jobs.configure({
@@ -660,7 +660,7 @@ Jobs.configure({
 });
 ```
 
-`montiapm:agent` is **not** a dependency of this package. The agent is looked up at run time, so an app without it (or on any version of it) builds unchanged. If `monti` is set but the agent is not found, the package logs one warning and runs jobs without tracing.
+`montiapm:agent` is **not** a dependency of this package. The agent is looked up at run time, so an app without it (or on any version of it) builds unchanged. If `monti` is set but the agent is not found, or is older than 2.50 (no jobs API), the package logs one warning and runs jobs without tracing.
 
 What you get:
 
@@ -722,6 +722,9 @@ TEST_CLIENT=0 meteor --release METEOR@3.5.2 test-packages ./ --port 3100 --once 
 ------
 
 ## Version History
+
+#### 2.2.2 (2026-10-11)
+- Detect old MontiAPM agent, show min required version is 2.50.
 
 #### 2.2.1 (2026-10-11)
 - Documentation only: the synchronous (Fibers) line for Meteor 1.3 to 2.x is now published as [`wildhart:jobs-fibers`](https://github.com/wildhart/meteor.jobs/tree/fibers) 1.2.0, at feature parity with this release. See "Which package do I want?"
